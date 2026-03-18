@@ -1,7 +1,7 @@
 {
-  "name": "entropyrs",
+  "name": "nentropy",
   "version": "1.0.0",
-  "description": "uentropy rewritten in ReScript – reactive DOM library",
+  "description": "micro js framework for lazy persons",
   "author": "Michal Majchrzak",
   "license": "MIT",
   "type": "module",
