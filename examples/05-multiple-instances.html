@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>entropy – Multiple Instances</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 4rem auto; }
+    .widget { border: 2px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    .widget h2 { margin-top: 0; }
+    button { padding: .3rem .8rem; cursor: pointer; }
+    .count { font-size: 2rem; font-weight: bold; }
+    #build-error code { background: #f3f4f6; padding: .2rem .4rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <!-- Requires: npm run build  (generates dist/entropy.min.js) -->
+
+  <h1>Multiple Instances</h1>
+  <p>Each widget uses its own <code>createInstance()</code> — scopes are completely isolated.</p>
+
+  <div class="widget">
+    <h2>Widget A</h2>
+    <span class="count" en-mark="counterA">0</span><br /><br />
+    <button onclick="dataA.counterA--">−</button>
+    <button onclick="dataA.counterA++">+</button>
+    <button onclick="destroyA()" style="margin-left:1rem;color:red">Destroy A</button>
+  </div>
+
+  <div class="widget">
+    <h2>Widget B <small style="font-weight:normal">(prefix: <code>data-b-</code>)</small></h2>
+    <span class="count" data-b-mark="counterB">0</span><br /><br />
+    <button onclick="dataB.counterB--">−</button>
+    <button onclick="dataB.counterB++">+</button>
+    <button onclick="destroyB()" style="margin-left:1rem;color:red">Destroy B</button>
+  </div>
+
+  <p en-mark="log" style="color:#888;font-size:.9rem"></p>
+
+  <script src="https://unpkg.com/uentropy/dist/entropy.min.js" onerror="
+    document.body.innerHTML = '<div id=build-error><h2>⚠️ Build required</h2><p>Run <code>npm run build</code> in the project root, then reload.</p></div>';
+  "></script>
+  <script>
+    const { createInstance } = UEntropy;
+
+    // Widget A — uses default en- prefix
+    const enA      = createInstance();
+    window.dataA   = enA.init();
+    dataA.counterA = 0;
+    dataA.log      = '';
+    enA.watch('counterA', v => dataA.log = 'A: counter → ' + v);
+
+    window.destroyA = () => {
+      enA.destroy();
+      dataA.log = 'Widget A destroyed – further clicks have no effect.';
+    };
+
+    // Widget B — uses data-b- prefix
+    const enB      = createInstance();
+    enB.prefix('data-b');
+    window.dataB   = enB.init();
+    dataB.counterB = 0;
+    enB.watch('counterB', v => dataA.log = 'B: counter → ' + v);
+
+    window.destroyB = () => {
+      enB.destroy();
+      dataA.log = 'Widget B destroyed – further clicks have no effect.';
+    };
+  </script>
+</body>
+</html>

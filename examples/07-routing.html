@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>entropy – Routing</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f8fafc; color: #0f172a; min-height: 100vh; }
+
+    /* Layout */
+    nav {
+      background: #0f172a; padding: 0 2rem;
+      display: flex; align-items: center; gap: 2rem; height: 56px;
+    }
+    nav .brand { color: #fff; font-weight: 700; font-size: 1rem; text-decoration: none; }
+    nav a {
+      color: #94a3b8; font-size: .875rem; text-decoration: none;
+      padding: .35rem .6rem; border-radius: 6px; transition: color .15s, background .15s;
+    }
+    nav a:hover  { color: #fff; }
+    nav a.active { color: #fff; background: #1e293b; }
+
+    main { max-width: 860px; margin: 3rem auto; padding: 0 1.5rem; }
+
+    /* Pages */
+    .page { display: none; }
+    .page.visible { display: block; }
+
+    h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 1rem; }
+    p  { color: #475569; line-height: 1.7; margin-bottom: .75rem; }
+
+    /* Blog list */
+    .post-list { list-style: none; display: flex; flex-direction: column; gap: .75rem; margin-top: 1rem; }
+    .post-card {
+      background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+      padding: 1rem 1.25rem; cursor: pointer; transition: border-color .15s, box-shadow .15s;
+    }
+    .post-card:hover { border-color: #6366f1; box-shadow: 0 0 0 3px #eef2ff; }
+    .post-card h3 { font-size: 1rem; font-weight: 600; }
+    .post-card .meta { font-size: .8rem; color: #94a3b8; margin-top: .25rem; }
+
+    /* Single post */
+    .back-btn {
+      display: inline-flex; align-items: center; gap: .4rem;
+      font-size: .85rem; color: #6366f1; text-decoration: none; margin-bottom: 1.5rem;
+    }
+    .back-btn:hover { text-decoration: underline; }
+    .post-body { color: #334155; line-height: 1.8; }
+
+    /* Contact form */
+    .form { display: flex; flex-direction: column; gap: 1rem; max-width: 480px; margin-top: 1rem; }
+    .form label { font-size: .85rem; font-weight: 600; color: #374151; }
+    .form input, .form textarea {
+      width: 100%; padding: .5rem .75rem; border: 1px solid #d1d5db;
+      border-radius: 8px; font-size: .95rem; font-family: inherit;
+      transition: border-color .15s; outline: none;
+    }
+    .form input:focus, .form textarea:focus { border-color: #6366f1; box-shadow: 0 0 0 3px #eef2ff; }
+    .form textarea { min-height: 120px; resize: vertical; }
+    .form button {
+      align-self: flex-start; padding: .5rem 1.5rem;
+      background: #6366f1; color: #fff; border: none;
+      border-radius: 8px; font-size: .95rem; font-weight: 600; cursor: pointer;
+    }
+    .form button:hover { background: #4f46e5; }
+    .success { color: #16a34a; font-weight: 600; margin-top: .5rem; }
+    #build-error code { background: #f3f4f6; padding: .2rem .4rem; border-radius: 4px; }
+
+    /* 404 */
+    .not-found { text-align: center; padding: 4rem 0; }
+    .not-found .code { font-size: 5rem; font-weight: 800; color: #e2e8f0; }
+  </style>
+</head>
+<body>
+
+<!-- Navigation -->
+<nav>
+  <a class="brand" href="#/">entropy</a>
+  <a href="#/">Home</a>
+  <a href="#/blog">Blog</a>
+  <a href="#/contact">Contact</a>
+</nav>
+
+<!-- Pages -->
+<main>
+
+  <!-- Home -->
+  <div class="page" id="page-home">
+    <h1>Welcome</h1>
+    <p>
+      This is a single-page application built with entropy and a tiny
+      hash-based router — no external routing library needed.
+    </p>
+    <p>
+      The router lives entirely in <code>~30 lines of JavaScript</code>. It
+      listens to <code>hashchange</code>, parses the current hash, stores the
+      matched route and its params as reactive data, and entropy takes care of
+      showing and hiding pages.
+    </p>
+    <p>
+      Navigate using the links above or jump directly to
+      <a href="#/blog/2" style="color:#6366f1">blog post #2</a>.
+    </p>
+  </div>
+
+  <!-- Blog list -->
+  <div class="page" id="page-blog">
+    <h1>Blog</h1>
+    <ul class="post-list" id="post-list"></ul>
+  </div>
+
+  <!-- Single post -->
+  <div class="page" id="page-post">
+    <a class="back-btn" href="#/blog">← Back to Blog</a>
+    <h1 id="post-title"></h1>
+    <p class="meta" id="post-meta"></p>
+    <div class="post-body" id="post-body"></div>
+  </div>
+
+  <!-- Contact -->
+  <div class="page" id="page-contact">
+    <h1>Contact</h1>
+    <p>Fill in the form and we'll get back to you.</p>
+    <div class="form">
+      <label>Name
+        <input type="text" placeholder="Your name" en-model="contact.name" />
+      </label>
+      <label>Email
+        <input type="email" placeholder="you@example.com" en-model="contact.email" />
+      </label>
+      <label>Message
+        <textarea placeholder="What's on your mind?" en-model="contact.message"></textarea>
+      </label>
+      <button onclick="submitContact()">Send</button>
+      <template en-if="contact.sent">
+        <p class="success">Message sent! We'll be in touch.</p>
+      </template>
+    </div>
+  </div>
+
+  <!-- 404 -->
+  <div class="page" id="page-404">
+    <div class="not-found">
+      <div class="code">404</div>
+      <h1>Page not found</h1>
+      <p><a href="#/" style="color:#6366f1">Go home</a></p>
+    </div>
+  </div>
+
+</main>
+
+<script src="https://unpkg.com/uentropy/dist/entropy.min.js" onerror="
+  document.body.innerHTML = '<div id=build-error style=padding:2rem><h2>⚠️ Build required</h2><p>Run <code>npm run build</code> in the project root, then reload.</p></div>';
+"></script>
+<script>
+// ─── Data ─────────────────────────────────────────────────────────────────────
+
+const en = UEntropy.default;
+window.data = en.init();
+
+data.contact = { name: '', email: '', message: '', sent: false };
+
+// ─── Sample blog posts ────────────────────────────────────────────────────────
+
+const posts = [
+  {
+    id: 1,
+    title: 'Why no virtual DOM?',
+    date: 'March 1, 2026',
+    excerpt: 'Virtual DOM is a great idea that comes with real costs.',
+    body: `Virtual DOM was a breakthrough in 2013. The insight — that you can
+re-render the whole UI into a cheap in-memory tree and diff against the previous
+snapshot — made component-based UIs practical.\n\nBut the cost is always there:
+every update allocates thousands of vnode objects, runs a recursive diff, and
+then patches the real DOM. For most apps the overhead is invisible. For small
+reactive surfaces it is pure waste.\n\nEntropy takes the opposite bet: skip the
+abstraction layer entirely, let the developer describe intent through attributes,
+and update only the elements that need updating. No allocation, no diff, no
+framework in the critical path.`,
+  },
+  {
+    id: 2,
+    title: 'Reactivity with Proxy',
+    date: 'March 5, 2026',
+    excerpt: 'How a single Proxy trap replaces an entire signals system.',
+    body: `The ES Proxy API lets you intercept any property access or assignment
+on an object. Entropy wraps your data in a Proxy and uses the set trap to
+trigger DOM updates.\n\nWhen you write data.count = 1, the trap fires, finds
+every element with en-mark="count", and sets their textContent. That's the
+whole trick.\n\nDependency tracking for computed values uses the get trap: while
+evaluating a computed function, every property read is recorded. When any of
+those properties later changes, the computed re-runs.`,
+  },
+  {
+    id: 3,
+    title: 'When to reach for something bigger',
+    date: 'March 9, 2026',
+    excerpt: 'Entropy is not the right tool for every job.',
+    body: `Entropy has hard limits. No server-side rendering. No key-based
+reconciliation for large lists. No component model beyond Web Components.
+No TypeScript JSX.\n\nIf you are building a document-heavy marketing site,
+entropy is probably overkill — plain HTML is fine. If you are building a
+complex data-heavy dashboard with thousands of reactive nodes, reach for React,
+Solid, or Svelte.\n\nEntropy lives in the middle: interactive pages that need
+more than sprinkles of jQuery but less than a full SPA framework.`,
+  },
+];
+
+// ─── Render blog list ─────────────────────────────────────────────────────────
+
+const list = document.getElementById('post-list');
+posts.forEach(post => {
+  const li = document.createElement('li');
+  li.innerHTML = `
+    <div class="post-card" onclick="navigate('#/blog/${post.id}')">
+      <h3>${post.title}</h3>
+      <p class="meta">${post.date} · ${post.excerpt}</p>
+    </div>`;
+  list.appendChild(li);
+});
+
+// ─── Router ───────────────────────────────────────────────────────────────────
+
+const routes = [
+  { pattern: /^\/$/, page: 'home' },
+  { pattern: /^\/blog$/, page: 'blog' },
+  { pattern: /^\/blog\/(\d+)$/, page: 'post' },
+  { pattern: /^\/contact$/, page: 'contact' },
+];
+
+function navigate(hash) {
+  window.location.hash = hash;
+}
+
+function resolve() {
+  const hash  = window.location.hash.slice(1) || '/';
+  const match = routes.find(r => r.pattern.test(hash));
+  const page  = match ? match.page : '404';
+  const params = match ? (hash.match(match.pattern) ?? []).slice(1) : [];
+
+  // Hide all pages, show the matched one
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('visible'));
+  document.getElementById('page-' + page).classList.add('visible');
+
+  // Update nav active state
+  document.querySelectorAll('nav a').forEach(a => {
+    const href = a.getAttribute('href');
+    a.classList.toggle('active', href === '#' + hash || (href === '#/' && hash === '/'));
+  });
+
+  // Page-specific logic
+  if (page === 'post') {
+    const post = posts.find(p => p.id === +params[0]);
+    if (post) {
+      document.getElementById('post-title').textContent = post.title;
+      document.getElementById('post-meta').textContent  = post.date;
+      document.getElementById('post-body').textContent  = post.body;
+    }
+  }
+
+  if (page === 'contact') {
+    // Reset form on each visit
+    data.contact.sent = false;
+  }
+}
+
+window.addEventListener('hashchange', resolve);
+resolve(); // run on initial load
+
+// ─── Contact form ─────────────────────────────────────────────────────────────
+
+window.submitContact = () => {
+  if (!data.contact.name || !data.contact.email) return;
+  // Simulate send
+  setTimeout(() => { data.contact.sent = true; }, 300);
+};
+</script>
+</body>
+</html>

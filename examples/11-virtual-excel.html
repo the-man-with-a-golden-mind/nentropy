@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>uentropy – Virtual Excel (100 000 rows)</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f8fafc;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      color: #1e293b;
+    }
+
+    /* ── Toolbar ────────────────────────────────────────────────────────────── */
+    #toolbar {
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 10px; height: 38px; flex-shrink: 0;
+      background: #fff; border-bottom: 1px solid #e2e8f0; font-size: 13px;
+    }
+    #brand   { font-weight: 700; color: #6366f1; font-size: 14px; letter-spacing: -.3px; }
+    .vsep    { width: 1px; height: 20px; background: #e2e8f0; margin: 0 2px; flex-shrink: 0; }
+    #addr    { width: 66px; text-align: center; font-size: 12px; font-weight: 700;
+               background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px;
+               padding: 3px 6px; color: #334155; flex-shrink: 0; cursor: default; }
+    #fbar    { flex: 1; min-width: 0; border: 1px solid #cbd5e1; border-radius: 4px;
+               padding: 3px 9px; font-size: 13px; font-family: monospace; outline: none; }
+    #fbar:focus { border-color: #6366f1; box-shadow: 0 0 0 3px #e0e7ff; }
+    .tbtn    { font-size: 12px; padding: 3px 10px; cursor: pointer; white-space: nowrap;
+               border: 1px solid #e2e8f0; border-radius: 4px; background: #fff; color: #475569; }
+    .tbtn:hover { background: #f1f5f9; }
+    #perf    { font-size: 11px; background: #f0fdf4; color: #16a34a;
+               border: 1px solid #bbf7d0; border-radius: 10px; padding: 2px 9px;
+               font-weight: 700; flex-shrink: 0; min-width: 60px; text-align: center; }
+
+    /* ── Grid wrapper ───────────────────────────────────────────────────────── */
+    #grid-wrap {
+      flex: 1; min-height: 0; overflow: hidden;
+      border: 1px solid #e2e8f0;
+    }
+    #gs {                                   /* single scroll container          */
+      width: 100%; height: 100%;
+      overflow: auto; position: relative;
+      will-change: transform;
+    }
+
+    /* ── Header row ─────────────────────────────────────────────────────────── */
+    #hdr {
+      display: flex; position: sticky; top: 0; z-index: 30;
+      height: 28px; background: #f1f5f9;
+      border-bottom: 2px solid #cbd5e1;
+    }
+    .rnh { width: 56px; min-width: 56px; flex-shrink: 0;
+           border-right: 2px solid #cbd5e1; }
+    .ch  { position: relative; flex-shrink: 0;
+           display: flex; align-items: center; justify-content: center;
+           font-size: 11px; font-weight: 700; color: #475569;
+           border-right: 1px solid #e2e8f0; user-select: none;
+           transition: background .1s; }
+    .ch:hover     { background: #e2e8f0; }
+    .ch.acol      { background: #e0e7ff; color: #4338ca; }
+    .rzh { position: absolute; right: 0; top: 0; bottom: 0; width: 6px;
+           cursor: col-resize; z-index: 1; }
+    .rzh:hover, .rzh.drg { background: #6366f1; opacity: .7; }
+
+    /* ── Virtual space ──────────────────────────────────────────────────────── */
+    #vs { position: relative; }
+
+    /* ── Row ────────────────────────────────────────────────────────────────── */
+    .vr { position: absolute; left: 0; display: flex; height: 24px; background: #fff; }
+    .vr:hover .rn { background: #eff6ff; }
+    .vr.arow .rn  { background: #e0e7ff !important; color: #4338ca; font-weight: 700; }
+
+    /* ── Row-number cell ────────────────────────────────────────────────────── */
+    .rn { width: 56px; min-width: 56px; flex-shrink: 0;
+          display: flex; align-items: center; justify-content: flex-end;
+          padding-right: 8px; font-size: 11px; color: #94a3b8;
+          border-right: 2px solid #cbd5e1; border-bottom: 1px solid #f1f5f9;
+          background: #f8fafc; cursor: default; user-select: none; }
+
+    /* ── Data cell ──────────────────────────────────────────────────────────── */
+    .vc { flex-shrink: 0; height: 24px; line-height: 22px;
+          padding: 0 5px; font-size: 13px;
+          border-right: 1px solid #f1f5f9; border-bottom: 1px solid #f1f5f9;
+          outline: none; overflow: hidden; white-space: nowrap; cursor: cell; }
+    .vc:focus { position: relative; z-index: 10;
+                border: 2px solid #6366f1; padding: 0 4px;
+                background: #fff !important;
+                box-shadow: 0 0 0 3px rgba(99,102,241,.18); }
+    .vc.acel  { background: #eef2ff; }
+    .vc.hval  { background: #fafff9; }
+
+    /* ── Footer ─────────────────────────────────────────────────────────────── */
+    #footer {
+      height: 26px; display: flex; align-items: center; gap: 18px;
+      padding: 0 14px; font-size: 11px; color: #64748b;
+      background: #f1f5f9; border-top: 1px solid #e2e8f0; flex-shrink: 0;
+    }
+    #footer b { color: #334155; }
+
+    /* ── Scrollbars ─────────────────────────────────────────────────────────── */
+    ::-webkit-scrollbar         { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track   { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb   { background: #cbd5e1; border-radius: 5px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  </style>
+</head>
+<body>
+
+<!-- ── Toolbar ──────────────────────────────────────────────────────────────── -->
+<div id="toolbar">
+  <span id="brand">⚡ uentropy</span>
+  <div class="vsep"></div>
+  <!--
+    en-mark="selAddr" — driven by a computed value: LABELS[selCol] + (selRow + 1)
+    Updates automatically whenever selRow or selCol changes.
+  -->
+  <div id="addr" en-mark="selAddr">A1</div>
+  <!--
+    en-fbar="selVal" — custom directive that handles two-way formula-bar sync.
+    data→DOM: updates input.value when selVal changes (e.g. on cell navigation).
+    DOM→data: attaches focus/blur/input/keydown handlers on first call.
+  -->
+  <input id="fbar" en-fbar="selVal" placeholder="Value…" autocomplete="off" spellcheck="false" />
+  <!--
+    en-click="ready:ACTION" — custom parametric directive.
+    Fires when data.ready = true; param = action name → dispatches to actions{}.
+  -->
+  <button class="tbtn" en-click="ready:fill">Fill 2 000 random</button>
+  <button class="tbtn" en-click="ready:clear">Clear all</button>
+  <button class="tbtn" en-click="ready:last">→ Last row</button>
+  <div class="vsep"></div>
+  <div id="perf">— ms</div>
+</div>
+
+<!-- ── Grid ─────────────────────────────────────────────────────────────────── -->
+<div id="grid-wrap">
+  <!--
+    en-scroll-save="ready" — custom directive that attaches a scroll listener
+    which saves + blurs any focused cell before the row pool is recycled.
+  -->
+  <div id="gs" en-scroll-save="ready">
+    <div id="hdr"><div class="rnh"></div><!-- column headers injected by JS --></div>
+    <!--
+      en-cell-grid="ready" — custom directive that attaches focusin / blur /
+      keydown delegation for all virtual cells (focus, save, keyboard nav).
+    -->
+    <div id="vs" en-cell-grid="ready"></div>
+  </div>
+</div>
+
+<!-- ── Footer ───────────────────────────────────────────────────────────────── -->
+<div id="footer">
+  <span><b>100 000</b> rows · <b>40</b> cols</span>
+  <!-- en-mark="editedCount" — built-in reactive binding, updates on every save -->
+  <span>Edited: <b en-mark="editedCount">0</b> cells</span>
+  <span id="mem"></span>
+</div>
+
+<script src="../dist/entropy.min.js" onerror="
+  document.body.innerHTML='<div style=padding:2rem;font-family:system-ui><h2>⚠ Run <code>npm run build</code> first</h2></div>';
+"></script>
+<script>
+'use strict';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const ROWS     = 100_000;
+const COLS     = 40;
+const ROW_H    = 24;         // px
+const HDR_H    = 28;         // header row height px
+const RN_W     = 56;         // row-number column px
+const DEF_CW   = 80;         // default column width px
+const MIN_CW   = 36;
+const BUFFER   = 12;         // off-screen rows above / below viewport
+
+// Column labels A–Z then AA–AN (40 total)
+const LABELS = Array.from({ length: COLS }, (_, i) =>
+  i < 26
+    ? String.fromCharCode(65 + i)
+    : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + i % 26)
+);
+
+// ─── uentropy model ───────────────────────────────────────────────────────────
+//
+// • data.editedCount  – drives <b en-mark="editedCount"> in footer
+// • data.cells        – sparse "r_c" → value store (proxy cached below)
+// • data.selRow/Col   – current selection, drive the selAddr computed
+// • data.selAddr      – computed column+row label, drives <div en-mark="selAddr">
+// • data.selVal       – current cell value, drives the en-fbar directive
+// • data.ready        – set true after setup; triggers en-cell-grid,
+//                       en-scroll-save and en-col-resize setup directives
+//
+const en   = UEntropy.createInstance();
+const data = en.init();
+
+data.editedCount = 0;
+data.cells       = {};    // uentropy wraps this; cache proxy reference below
+data.selRow      = 0;
+data.selCol      = 0;
+data.selAddr     = en.computed(() => LABELS[data.selCol] + (data.selRow + 1));
+data.selVal      = '';
+// data.ready is set last, after directives and headers are in place
+
+// Cache the cells proxy to avoid double proxy-lookup in the render hot path.
+// Refreshed whenever data.cells is reassigned.
+let cells = data.cells;
+
+// ─── DOM refs ────────────────────────────────────────────────────────────────
+
+const gs   = document.getElementById('gs');
+const hdr  = document.getElementById('hdr');
+const vs   = document.getElementById('vs');
+const perf = document.getElementById('perf');
+const mem  = document.getElementById('mem');
+
+// ─── Column widths ────────────────────────────────────────────────────────────
+// Plain Int32Array + CSS custom properties — kept non-reactive so the resize
+// hot path (mousemove) never touches uentropy's proxy layer.
+
+const colWidths = new Int32Array(COLS).fill(DEF_CW);
+
+const cwStyle = document.createElement('style');
+document.head.appendChild(cwStyle);
+
+function buildWidthCSS() {
+  cwStyle.textContent = Array.from({ length: COLS }, (_, c) =>
+    `.w${c}{width:var(--w${c});min-width:var(--w${c})}`
+  ).join('');
+}
+
+function applyCSSVars() {
+  for (let c = 0; c < COLS; c++) {
+    gs.style.setProperty(`--w${c}`, colWidths[c] + 'px');
+  }
+}
+
+buildWidthCSS();
+applyCSSVars();
+
+// ─── Column headers ───────────────────────────────────────────────────────────
+// Each resize handle gets en-col-resize="ready:N" (parametric directive).
+// The directive fires for all handles when data.ready = true is set below,
+// attaching the mousedown handler for column drag.
+
+for (let c = 0; c < COLS; c++) {
+  const h = document.createElement('div');
+  h.className      = `ch w${c}`;
+  h.dataset.col    = c;
+  h.textContent    = LABELS[c];
+  const rz         = document.createElement('div');
+  rz.className     = 'rzh';
+  rz.dataset.col   = c;
+  rz.setAttribute('en-col-resize', 'ready:' + c);   // parametric: key=ready, param=colIndex
+  h.appendChild(rz);
+  hdr.appendChild(h);
+}
+
+// ─── Virtual space ────────────────────────────────────────────────────────────
+
+vs.style.height = (ROWS * ROW_H) + 'px';
+
+// ─── Row pool ─────────────────────────────────────────────────────────────────
+//
+// Pre-allocate a fixed set of row elements.
+// On every scroll / render we reposition + refill them — zero allocation.
+
+const pool = [];
+
+function makePoolRow() {
+  const row  = document.createElement('div');
+  row.className    = 'vr';
+  row.style.display = 'none';
+
+  const rn = document.createElement('div');
+  rn.className = 'rn';
+  rn.setAttribute('aria-hidden', 'true');
+  row.appendChild(rn);
+
+  for (let c = 0; c < COLS; c++) {
+    const cell           = document.createElement('div');
+    cell.className       = `vc w${c}`;
+    cell.contentEditable = 'true';
+    cell.dataset.col     = c;
+    row.appendChild(cell);
+  }
+
+  vs.appendChild(row);
+  return row;
+}
+
+function growPool(need) {
+  while (pool.length < need) pool.push(makePoolRow());
+}
+
+// ─── Selection state ──────────────────────────────────────────────────────────
+
+let selRow   = 0;
+let selCol   = 0;
+let fbActive = false;  // true while formula bar has focus (prevents fbar overwrite)
+
+// ─── Render ───────────────────────────────────────────────────────────────────
+
+function render() {
+  const t0 = performance.now();
+
+  const scrollTop = gs.scrollTop;
+  const viewH     = gs.clientHeight - HDR_H;
+  const visCnt    = Math.ceil(viewH / ROW_H);
+
+  const first = Math.max(0, Math.floor(scrollTop / ROW_H) - BUFFER);
+  const last  = Math.min(ROWS - 1, first + visCnt + BUFFER * 2);
+  const count = last - first + 1;
+
+  growPool(count + 2);
+
+  const focused = document.activeElement;
+
+  for (let i = 0; i < pool.length; i++) {
+    const row = pool[i];
+
+    if (i >= count) { row.style.display = 'none'; continue; }
+
+    const r    = first + i;
+    const isSR = r === selRow;
+
+    row.style.display = '';
+    row.style.top     = (r * ROW_H) + 'px';
+    row.dataset.row   = r;
+    row.className     = isSR ? 'vr arow' : 'vr';
+
+    // Row number
+    row.firstElementChild.textContent = r + 1;
+
+    // Data cells
+    const children = row.children;
+    for (let c = 0; c < COLS; c++) {
+      const cell = children[c + 1];
+      const key  = r + '_' + c;
+      const val  = cells[key] ?? '';
+
+      cell.dataset.row = r;
+
+      // Never clobber the cell the user is actively typing in
+      if (cell !== focused) cell.textContent = val;
+
+      cell.className =
+        `vc w${c}` +
+        (val                              ? ' hval' : '') +
+        (isSR && c === selCol             ? ' acel' : '');
+    }
+  }
+
+  // Highlight active column header
+  const allCH = hdr.querySelectorAll('.ch.acol');
+  for (let i = 0; i < allCH.length; i++) allCH[i].classList.remove('acol');
+  const activeCH = hdr.children[selCol + 1];
+  if (activeCH) activeCH.classList.add('acol');
+
+  perf.textContent = (performance.now() - t0).toFixed(1) + ' ms';
+}
+
+// ─── Selection helpers ────────────────────────────────────────────────────────
+
+function selectCell(r, c) {
+  selRow = r;
+  selCol = c;
+  // Batch: selAddr (computed) fires once even though selRow + selCol both change.
+  // The en-fbar directive receives the new selVal and updates fbar.value.
+  en.batch(() => {
+    data.selRow = r;
+    data.selCol = c;
+    if (!fbActive) data.selVal = cells[r + '_' + c] ?? '';
+  });
+  render();
+}
+
+function ensureVisible(r) {
+  const top   = r * ROW_H;
+  const viewH = gs.clientHeight - HDR_H;
+  const st    = gs.scrollTop;
+  if      (top < st)               gs.scrollTop = top;
+  else if (top + ROW_H > st + viewH) gs.scrollTop = top + ROW_H - viewH;
+}
+
+function focusCell(r, c) {
+  ensureVisible(r);
+  requestAnimationFrame(() => {
+    for (const row of pool) {
+      if (row.style.display === 'none') continue;
+      if (+row.dataset.row === r) {
+        const cell = row.children[c + 1];
+        if (cell) cell.focus();
+        break;
+      }
+    }
+  });
+}
+
+// ─── Save cell value → uentropy model ─────────────────────────────────────────
+
+function saveCell(r, c, rawText) {
+  const val = rawText.trim();
+  const key = r + '_' + c;
+  const had = key in cells;
+
+  if (!val) {
+    if (had) {
+      delete cells[key];
+      data.editedCount = data.editedCount - 1;
+    }
+  } else {
+    cells[key] = val;
+    if (!had) data.editedCount = data.editedCount + 1;
+  }
+}
+
+function hasSelection(el) {
+  const s = window.getSelection();
+  return s && s.rangeCount > 0 && !s.getRangeAt(0).collapsed;
+}
+
+// ─── Custom directives ────────────────────────────────────────────────────────
+//
+// These four directives replace all manual addEventListener calls in the app,
+// demonstrating how uentropy's directive API can encapsulate DOM behaviour.
+
+// ── en-fbar ───────────────────────────────────────────────────────────────────
+//
+// Two-way binding for the formula bar.
+// Declared in HTML as: <input en-fbar="selVal" />
+//
+// data → DOM  Fires whenever data.selVal changes (via selectCell).
+//             Updates input.value unless the user is currently typing there.
+// DOM → data  Attaches focus / blur / input / keydown handlers on first call,
+//             exactly like the built-in en-model directive does for <input>.
+//
+en.directive('fbar', ({ el, value }) => {
+  if (!(el instanceof HTMLInputElement)) return;
+
+  // data → DOM
+  if (!fbActive) el.value = value ?? '';
+
+  // Attach event listeners exactly once (WeakMap-style guard on the element)
+  if (el._fbReady) return;
+  el._fbReady = true;
+
+  el.addEventListener('focus', () => { fbActive = true; });
+
+  el.addEventListener('blur', () => {
+    fbActive = false;
+    saveCell(selRow, selCol, el.value);
+    render();
+  });
+
+  // Mirror fbar keystrokes into the visible cell in real time
+  el.addEventListener('input', () => {
+    for (const row of pool) {
+      if (row.style.display === 'none') continue;
+      if (+row.dataset.row === selRow) {
+        const cell = row.children[selCol + 1];
+        if (cell && document.activeElement !== cell) cell.textContent = el.value;
+        break;
+      }
+    }
+  });
+
+  el.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); el.blur(); focusCell(selRow, selCol); }
+    if (e.key === 'Escape') {
+      fbActive = false;
+      el.value = cells[selRow + '_' + selCol] ?? '';
+      el.blur();
+    }
+  });
+});
+
+// ── en-scroll-save ────────────────────────────────────────────────────────────
+//
+// Auto-saves and blurs a focused cell before the row pool gets recycled on scroll.
+// Without this, the focused cell's DOM element would be repositioned to serve a
+// different row while still focused, causing content to "follow" the scroll and
+// dataset.row to point to the wrong row on blur.
+// Declared in HTML as: <div id="gs" en-scroll-save="ready">
+//
+en.directive('scroll-save', ({ el }) => {
+  if (el._scrollReady) return;
+  el._scrollReady = true;
+
+  el.addEventListener('scroll', () => {
+    const focused = document.activeElement;
+    if (focused?.classList?.contains('vc')) {
+      saveCell(+focused.dataset.row, +focused.dataset.col, focused.textContent);
+      focused.blur();
+    }
+    requestAnimationFrame(render);
+  }, { passive: true });
+});
+
+// ── en-col-resize (parametric) ────────────────────────────────────────────────
+//
+// Attaches mousedown drag-resize to each column resize handle.
+// Declared as en-col-resize="ready:N" where N is the column index.
+// uentropy queries [en-col-resize^="ready:"] when data.ready = true fires,
+// calling the directive once per handle with param = column index string.
+//
+// document-level mousemove / mouseup stay as plain listeners below
+// since they require document-wide scope.
+//
+let rzCol = -1, rzX0 = 0, rzW0 = 0;
+
+en.directive('col-resize', ({ el, param }) => {
+  const c = +(param ?? 0);
+  if (el._rzReady) return;
+  el._rzReady = true;
+
+  el.addEventListener('mousedown', e => {
+    rzCol = c;
+    rzX0  = e.clientX;
+    rzW0  = colWidths[c];
+    el.classList.add('drg');
+    e.preventDefault();
+  });
+}, true /* isParametric */);
+
+document.addEventListener('mousemove', e => {
+  if (rzCol < 0) return;
+  const w = Math.max(MIN_CW, rzW0 + e.clientX - rzX0);
+  if (w !== colWidths[rzCol]) {
+    colWidths[rzCol] = w;
+    gs.style.setProperty(`--w${rzCol}`, w + 'px');  // O(1) CSS var → single reflow
+  }
+});
+
+document.addEventListener('mouseup', () => {
+  if (rzCol < 0) return;
+  document.querySelectorAll('.rzh.drg').forEach(h => h.classList.remove('drg'));
+  rzCol = -1;
+});
+
+// ── en-cell-grid ──────────────────────────────────────────────────────────────
+//
+// Keyboard navigation + edit-save for the virtual cell pool.
+// Uses event delegation from the scroll container so it works correctly with
+// the row pool (individual cells are recycled; delegation stays stable).
+// Declared in HTML as: <div id="vs" en-cell-grid="ready">
+//
+en.directive('cell-grid', ({ el }) => {
+  if (el._cellReady) return;
+  el._cellReady = true;
+
+  el.addEventListener('focusin', e => {
+    const cell = e.target.closest('.vc');
+    if (!cell) return;
+    selectCell(+cell.dataset.row, +cell.dataset.col);
+    // Move caret to end of content
+    const s = window.getSelection(), rng = document.createRange();
+    rng.selectNodeContents(cell);
+    rng.collapse(false);
+    s.removeAllRanges();
+    s.addRange(rng);
+  });
+
+  el.addEventListener('blur', e => {
+    const cell = e.target.closest('.vc');
+    if (!cell) return;
+    saveCell(+cell.dataset.row, +cell.dataset.col, cell.textContent);
+    render();
+  }, true /* capture */);
+
+  el.addEventListener('keydown', e => {
+    const cell = e.target.closest('.vc');
+    if (!cell) return;
+    const r = +cell.dataset.row, c = +cell.dataset.col;
+
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      saveCell(r, c, cell.textContent);
+      const nr = Math.min(ROWS - 1, r + 1);
+      selectCell(nr, c); focusCell(nr, c);
+    } else if (e.key === 'Enter' && e.shiftKey) {
+      e.preventDefault();
+      saveCell(r, c, cell.textContent);
+      const nr = Math.max(0, r - 1);
+      selectCell(nr, c); focusCell(nr, c);
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      saveCell(r, c, cell.textContent);
+      const nc = e.shiftKey ? Math.max(0, c - 1) : Math.min(COLS - 1, c + 1);
+      selectCell(r, nc); focusCell(r, nc);
+    } else if (e.key === 'Escape') {
+      cell.textContent = cells[r + '_' + c] ?? '';
+      cell.blur();
+    } else if (e.key === 'ArrowDown' && !hasSelection(cell)) {
+      e.preventDefault();
+      saveCell(r, c, cell.textContent);
+      const nr = Math.min(ROWS - 1, r + 1);
+      selectCell(nr, c); focusCell(nr, c);
+    } else if (e.key === 'ArrowUp' && !hasSelection(cell)) {
+      e.preventDefault();
+      saveCell(r, c, cell.textContent);
+      const nr = Math.max(0, r - 1);
+      selectCell(nr, c); focusCell(nr, c);
+    }
+  });
+});
+
+// ─── en-click (parametric) ────────────────────────────────────────────────────
+//
+// Generic click directive. Declared as en-click="ready:ACTION".
+// Fires once per element when data.ready = true; param = action name.
+// Attaches a click listener that dispatches to the actions registry below.
+//
+const actions = {};
+
+en.directive('click', ({ el, param }) => {
+  if (el._clickReady) return;
+  el._clickReady = true;
+  el.addEventListener('click', () => { if (param) actions[param]?.(); });
+}, true /* isParametric */);
+
+// ─── Button actions ───────────────────────────────────────────────────────────
+
+actions.fill = () => {
+  const t0  = performance.now();
+  const N   = 2_000;
+  let added = 0;
+
+  en.batch(() => {
+    for (let i = 0; i < N; i++) {
+      const r   = Math.floor(Math.random() * ROWS);
+      const c   = Math.floor(Math.random() * COLS);
+      const key = r + '_' + c;
+      const had = key in cells;
+      cells[key] = String(Math.floor(Math.random() * 99_999));
+      if (!had) added++;
+    }
+    data.editedCount = data.editedCount + added;
+  });
+
+  render();
+  perf.textContent = (performance.now() - t0).toFixed(1) + ' ms';
+};
+
+actions.clear = () => {
+  en.batch(() => {
+    data.cells       = {};
+    data.editedCount = 0;
+    data.selVal      = '';
+  });
+  cells = data.cells;            // refresh cached proxy reference
+  render();
+};
+
+actions.last = () => {
+  gs.scrollTop = (ROWS - 30) * ROW_H;
+  selectCell(ROWS - 1, 0);
+  render();
+};
+
+// ─── Memory readout (Chrome only) ────────────────────────────────────────────
+
+if (performance.memory) {
+  setInterval(() => {
+    const mb = (performance.memory.usedJSHeapSize / 1_048_576).toFixed(1);
+    mem.textContent = `JS heap: ${mb} MB`;
+  }, 2_000);
+}
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+//
+// data.ready = true fires last, after:
+//   • all four custom directives are registered
+//   • column headers (with en-col-resize="ready:N") are in the DOM
+//   • #vs and #gs (with en-cell-grid / en-scroll-save) are in the DOM
+//
+// uentropy queries [en-col-resize^="ready:"], [en-cell-grid="ready"] and
+// [en-scroll-save="ready"], calling each directive to attach its listeners.
+
+render();
+selectCell(0, 0);   // triggers en-fbar via data.selVal, en-mark via data.selAddr
+data.ready = true;  // triggers en-col-resize × 40, en-cell-grid, en-scroll-save
+</script>
+</body>
+</html>

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>entropy – Todo List</title>
+  <style>
+    body { font-family: sans-serif; max-width: 480px; margin: 4rem auto; }
+    ul { padding: 0; list-style: none; }
+    li { display: flex; align-items: center; gap: .5rem; padding: .4rem 0; border-bottom: 1px solid #eee; }
+    li span { flex: 1; }
+    input[type="text"] { width: 100%; padding: .4rem; font-size: 1rem; box-sizing: border-box; }
+    button { padding: .3rem .8rem; cursor: pointer; }
+    .stats { font-size: .9rem; color: #666; margin-top: .5rem; }
+    #build-error code { background: #f3f4f6; padding: .2rem .4rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <!-- Requires: npm run build  (generates dist/entropy.min.js) -->
+
+  <h1>Todo List</h1>
+
+  <div style="display:flex; gap:.5rem; margin-bottom:1rem">
+    <input
+      type="text"
+      placeholder="What needs to be done?"
+      en-model="draft"
+      onkeydown="if(event.key==='Enter') addTodo()"
+    />
+    <button onclick="addTodo()">Add</button>
+  </div>
+
+  <p class="stats">
+    <span en-mark="stats.total">0</span> items,
+    <span en-mark="stats.done">0</span> done
+  </p>
+
+  <template en-if="hasTodos">
+    <button onclick="toggleAll()" style="margin-bottom:.5rem">Toggle all</button>
+  </template>
+
+  <ul>
+    <li en-mark="todos.#">
+      <span en-mark="todos.#.text"></span>
+      <button onclick="removeTodo(this)" en-mark="todos.#.id">✕</button>
+    </li>
+  </ul>
+
+  <template en-ifnot="hasTodos">
+    <p style="color:#aaa">Nothing to do! Add a task above.</p>
+  </template>
+
+  <script src="https://unpkg.com/uentropy/dist/entropy.min.js" onerror="
+    document.body.innerHTML = '<div id=build-error><h2>⚠️ Build required</h2><p>Run <code>npm run build</code> in the project root, then reload.</p></div>';
+  "></script>
+  <script>
+    const en = UEntropy.default;
+    window.data = en.init();
+
+    data.draft    = '';
+    data.todos    = [];
+    data.hasTodos = en.computed(() => data.todos.length > 0);
+    data.stats    = en.computed(() => ({
+      total: data.todos.length,
+      done:  data.todos.filter(t => t.done).length,
+    }));
+
+    let nextId = 1;
+
+    window.addTodo = () => {
+      const text = data.draft.trim();
+      if (!text) return;
+      data.todos = [...data.todos, { id: nextId++, text, done: false }];
+      data.draft = '';
+    };
+
+    window.removeTodo = btn => {
+      const li  = btn.closest('li');
+      const all = [...document.querySelectorAll('ul li[en-mark]')];
+      data.todos = data.todos.filter((_, i) => i !== all.indexOf(li));
+    };
+
+    window.toggleAll = () => {
+      const allDone = data.todos.every(t => t.done);
+      data.todos = data.todos.map(t => ({ ...t, done: !allDone }));
+    };
+  </script>
+</body>
+</html>

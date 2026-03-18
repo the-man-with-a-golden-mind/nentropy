@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>uentropy – happy-dom proof</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.3rem; margin-bottom: .5rem; }
+    .lead { color: #64748b; font-size: .9rem; margin-bottom: 1.5rem; }
+    .suite { border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 1rem; overflow: hidden; }
+    .suite-title { background: #f8fafc; padding: .6rem 1rem; font-weight: 700; font-size: .85rem;
+                   border-bottom: 1px solid #e2e8f0; }
+    .case { display: flex; align-items: center; gap: .75rem; padding: .5rem 1rem;
+            border-bottom: 1px solid #f1f5f9; font-size: .85rem; }
+    .case:last-child { border: none; }
+    .badge { padding: .15rem .5rem; border-radius: 4px; font-size: .75rem; font-weight: 700;
+             min-width: 3.5rem; text-align: center; flex-shrink: 0; }
+    .pass { background: #dcfce7; color: #16a34a; }
+    .fail { background: #fee2e2; color: #dc2626; }
+    .label { flex: 1; }
+    .detail { color: #94a3b8; font-family: monospace; font-size: .75rem; }
+    #run { padding: .4rem 1.2rem; background: #6366f1; color: #fff; border: none;
+           border-radius: 6px; cursor: pointer; font-size: .9rem; margin-bottom: 1.5rem; }
+    #run:hover { background: #4f46e5; }
+    #sandbox { display: none; }
+  </style>
+</head>
+<body>
+  <h1>happy-dom / real browser proof</h1>
+  <p class="lead">
+    These tests run the same assertions as the vitest suite — directly in the browser.
+    If they pass here but fail in happy-dom, the bug is in happy-dom, not uentropy.
+  </p>
+
+  <button id="run" onclick="runAll()">Run tests</button>
+  <div id="results"></div>
+  <div id="sandbox"></div>
+
+  <script src="../dist/entropy.min.js" onerror="
+    document.body.innerHTML = '<div style=padding:2rem><h2>⚠️ Run npm run build first</h2></div>';
+  "></script>
+  <script>
+    const results = [];
+
+    function assert(label, fn) {
+      try {
+        fn();
+        results.push({ label, ok: true });
+      } catch(e) {
+        results.push({ label, ok: false, detail: e.message });
+      }
+    }
+
+    function eq(a, b) {
+      const sa = JSON.stringify(a), sb = JSON.stringify(b);
+      if (sa !== sb) throw new Error(`expected ${sb} got ${sa}`);
+    }
+
+    function notNull(v, msg) {
+      if (v === null || v === undefined) throw new Error(msg ?? 'expected not null');
+    }
+
+    function makeContainer(html) {
+      const div = document.createElement('div');
+      div.innerHTML = html;
+      document.getElementById('sandbox').appendChild(div);
+      return div;
+    }
+
+    function cleanup(container, en) {
+      en?.destroy();
+      container?.remove();
+    }
+
+    // ── Suite 1: en-if / en-ifnot multi-child ────────────────────────────────
+
+    function suiteMultiChild() {
+      // Test 1a: inserts all children from multi-child template
+      {
+        const c = makeContainer(`
+          <template en-if="show">
+            <input id="inp" type="email" />
+            <button id="btn">Submit</button>
+          </template>
+        `);
+        const en = UEntropy.createInstance();
+        const data = en.init();
+        data.show = true;
+        assert('en-if: inserts all children from multi-child template', () => {
+          notNull(c.querySelector('#inp'), '#inp missing');
+          notNull(c.querySelector('#btn'), '#btn missing');
+        });
+        cleanup(c, en);
+      }
+
+      // Test 1b: removes all children when condition flips false
+      {
+        const c = makeContainer(`
+          <template en-if="show">
+            <input id="inp" />
+            <button id="btn">Submit</button>
+          </template>
+        `);
+        const en = UEntropy.createInstance();
+        const data = en.init();
+        data.show = true;
+        data.show = false;
+        assert('en-if: removes all children when condition flips false', () => {
+          if (c.querySelector('#inp')) throw new Error('#inp still in DOM');
+          if (c.querySelector('#btn')) throw new Error('#btn still in DOM');
+          notNull(c.querySelector('template[en-if]'), 'template missing');
+        });
+        cleanup(c, en);
+      }
+
+      // Test 1c: can toggle multiple times
+      {
+        const c = makeContainer(`
+          <template en-if="show">
+            <p id="a">A</p><p id="b">B</p><p id="c">C</p>
+          </template>
+        `);
+        const en = UEntropy.createInstance();
+        const data = en.init();
+        data.show = true;
+        assert('en-if toggle: 3 children visible after show=true', () =>
+          eq(c.querySelectorAll('p').length, 3));
+        data.show = false;
+        assert('en-if toggle: 0 children after show=false', () =>
+          eq(c.querySelectorAll('p').length, 0));
+        data.show = true;
+        assert('en-if toggle: 3 children again after show=true', () =>
+          eq(c.querySelectorAll('p').length, 3));
+        cleanup(c, en);
+      }
+
+      // Test 1d: en-ifnot multi-child
+      {
+        const c = makeContainer(`
+          <template en-ifnot="busy">
+            <input id="inp" /><button id="btn">Go</button>
+          </template>
+        `);
+        const en = UEntropy.createInstance();
+        const data = en.init();
+        data.busy = false;
+        assert('en-ifnot: inserts all children when value is falsy', () => {
+          notNull(c.querySelector('#inp'), '#inp missing');
+          notNull(c.querySelector('#btn'), '#btn missing');
+        });
+        cleanup(c, en);
+      }
+    }
+
+    // ── Suite 2: object array nested keys ────────────────────────────────────
+
+    function suiteObjectArrays() {
+      // Test 2a: manual step-by-step debug
+      {
+        const c = makeContainer(`<ul><li en-mark="users.#"><strong en-mark="users.#.name"></strong><span en-mark="users.#.email"></span></li></ul>`);
+        const plc = c.querySelector('[en-mark="users.#"]');
+
+        // Step 1: what does plc look like?
+        console.log('[1] plc tagName:', plc?.tagName);
+        console.log('[1] plc children.length:', plc?.children.length);
+        console.log('[1] plc outerHTML:', plc?.outerHTML);
+
+        // Step 2: clone while live
+        const cloneLive = plc?.cloneNode(true);
+        console.log('[2] cloneLive children.length:', cloneLive?.childNodes?.length, cloneLive?.children?.length);
+        console.log('[2] cloneLive outerHTML:', cloneLive?.outerHTML);
+
+        // Step 3: clone from detached
+        const cloneDetached = cloneLive?.cloneNode(true);
+        console.log('[3] cloneDetached children.length:', cloneDetached?.children?.length);
+        console.log('[3] cloneDetached outerHTML:', cloneDetached?.outerHTML);
+
+        // Step 4: Manually reproduce initializeArrayElements sequence
+        // to find exactly where children disappear
+
+        // 4a: clone while live (what initializeArrayElements does before replaceWith)
+        const cloneForTemplate = plc.cloneNode(true);
+        console.log('[4a] clone for template.content children:', cloneForTemplate.children?.length, cloneForTemplate.outerHTML);
+
+        // 4b: create template and append clone
+        const tmpl = document.createElement('template');
+        tmpl.content.appendChild(cloneForTemplate);
+        tmpl.setAttribute('en-mark', 'users.#');
+
+        // 4c: replaceWith — detaches plc
+        plc.replaceWith(tmpl);
+        console.log('[4c] plc detached, plc children:', plc.children.length, plc.outerHTML);
+
+        // 4d: clone from detached plc (this is what the loop does: placeholder.cloneNode(true))
+        const cloneFromDetached = plc.cloneNode(true);
+        console.log('[4d] clone from detached plc children:', cloneFromDetached.children?.length, cloneFromDetached.outerHTML);
+
+        // 4e: clone from template.content (alternative)
+        const cloneFromContent = tmpl.content.firstElementChild?.cloneNode(true);
+        console.log('[4e] clone from template.content children:', cloneFromContent?.children?.length, cloneFromContent?.outerHTML);
+
+        // 4f: insert clone from detached into DOM
+        const insertedClone = plc.cloneNode(true);
+        tmpl.before(insertedClone);
+        console.log('[4f] after tmpl.before — inserted outerHTML:', insertedClone.outerHTML);
+        console.log('[4f] inserted children in DOM:', insertedClone.children.length);
+
+        // 4g: simulate EXACTLY what initializeClone does — rewrite keys via querySelectorAll
+        const cloneForInit = plc.cloneNode(true);
+        const dirNames = ['mark', 'model', 'if', 'ifnot'];
+        dirNames.forEach(suffix => {
+          const attrName = 'en-' + suffix;
+          // rewrite root
+          const cur = cloneForInit.getAttribute(attrName);
+          if (cur?.startsWith('users.#')) cloneForInit.setAttribute(attrName, 'users.0' + cur.slice('users.#'.length));
+          // rewrite children via querySelectorAll ON DETACHED ELEMENT
+          cloneForInit.querySelectorAll('[' + attrName + ']').forEach(child => {
+            const c2 = child.getAttribute(attrName);
+            if (c2?.startsWith('users.#')) child.setAttribute(attrName, 'users.0' + c2.slice('users.#'.length));
+          });
+        });
+        console.log('[4g] after querySelectorAll rewrite on detached — children:', cloneForInit.children.length, cloneForInit.outerHTML);
+        tmpl.before(cloneForInit);
+        console.log('[4g] after tmpl.before — children in DOM:', cloneForInit.children.length, cloneForInit.outerHTML);
+
+        // cleanup manual test
+        insertedClone.remove();
+        cloneForInit.remove();
+        tmpl.remove();
+        c.querySelector('ul')?.appendChild(plc); // restore
+
+        const en = UEntropy.createInstance();
+        const data = en.init();
+
+        console.log('[4] plc after init, still in DOM?', !!plc?.parentNode);
+        data.users = [{ name: 'Alice', email: 'alice@example.com' }, { name: 'Bob', email: 'bob@example.com' }];
+
+        // Step 5: after set
+        console.log('[5] all elements in c after set:', [...c.querySelectorAll('*')].map(el => el.tagName + (el.getAttribute('en-mark') ? '[' + el.getAttribute('en-mark') + ']' : '')).join(', '));
+        console.log('[5] strong count:', c.querySelectorAll('strong').length);
+        console.log('[5] li non-template:', [...c.querySelectorAll('li')].filter(el => !el.getAttribute('en-mark')?.endsWith('#')).length);
+
+        const names  = [...c.querySelectorAll('strong')].map(el => el.textContent);
+        const emails = [...c.querySelectorAll('span')].map(el => el.textContent);
+        assert('object array: renders nested keys', () => {
+          eq(names, ['Alice', 'Bob']);
+          eq(emails, ['alice@example.com', 'bob@example.com']);
+        });
+        cleanup(c, en);
+      }
+
+      // Test 2b: updates a nested key when object property changes
+      {
+        const c = makeContainer(`
+          <ul>
+            <li en-mark="users.#">
+              <strong en-mark="users.#.name"></strong>
+            </li>
+          </ul>
+        `);
+        const en = UEntropy.createInstance();
+        const data = en.init();
+        data.users = [{ name: 'Alice' }, { name: 'Bob' }];
+        data.users[0].name = 'Alicia';
+        const names = [...c.querySelectorAll('strong')].map(el => el.textContent);
+        assert('object array: updates nested key on property change', () =>
+          eq(names[0], 'Alicia'));
+        cleanup(c, en);
+      }
+    }
+
+    // ── Suite 3: basic sanity ────────────────────────────────────────────────
+
+    function suiteSanity() {
+      {
+        const c = makeContainer(`<span en-mark="count"></span>`);
+        const en = UEntropy.createInstance();
+        const data = en.init();
+        data.count = 42;
+        assert('en-mark: sets textContent', () =>
+          eq(c.querySelector('span').textContent, '42'));
+        cleanup(c, en);
+      }
+      {
+        const c = makeContainer(`<ul><li en-mark="items.#"></li></ul>`);
+        const en = UEntropy.createInstance();
+        const data = en.init();
+        data.items = ['a', 'b', 'c'];
+        const real = [...c.querySelectorAll('li')]
+          .filter(el => !el.getAttribute('en-mark')?.endsWith('#'));
+        assert('array: renders 3 items', () => eq(real.length, 3));
+        data.items.push('d');
+        const after = [...c.querySelectorAll('li')]
+          .filter(el => !el.getAttribute('en-mark')?.endsWith('#'));
+        assert('array: push adds item', () => eq(after.length, 4));
+        cleanup(c, en);
+      }
+    }
+
+    function runAll() {
+      results.length = 0;
+      document.getElementById('sandbox').innerHTML = '';
+
+      suiteSanity();
+      suiteMultiChild();
+      suiteObjectArrays();
+
+      render();
+    }
+
+    function render() {
+      const suites = {
+        'Basic sanity':            results.slice(0, 2),
+        'en-if / en-ifnot multi-child': results.slice(2, 7),
+        'Object array nested keys': results.slice(7),
+      };
+
+      const total  = results.length;
+      const passed = results.filter(r => r.ok).length;
+
+      let html = `<p style="font-size:.85rem;margin-bottom:1rem">
+        <strong>${passed}/${total}</strong> passed
+        ${passed < total ? `— <span style="color:#dc2626">${total-passed} failed</span>` : '— <span style="color:#16a34a">all pass ✓</span>'}
+      </p>`;
+
+      for (const [title, cases] of Object.entries(suites)) {
+        html += `<div class="suite">
+          <div class="suite-title">${title}</div>
+          ${cases.map(r => `
+            <div class="case">
+              <span class="badge ${r.ok ? 'pass' : 'fail'}">${r.ok ? 'PASS' : 'FAIL'}</span>
+              <span class="label">${r.label}</span>
+              ${r.detail ? `<span class="detail">${r.detail}</span>` : ''}
+            </div>`).join('')}
+        </div>`;
+      }
+
+      document.getElementById('results').innerHTML = html;
+    }
+  </script>
+</body>
+</html>

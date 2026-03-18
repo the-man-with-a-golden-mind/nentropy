@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>entropy – Two-way binding</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f8fafc; color: #0f172a;
+           max-width: 680px; margin: 3rem auto; padding: 0 1.5rem; }
+
+    h1 { font-size: 1.6rem; font-weight: 700; margin-bottom: .25rem; }
+    .lead { color: #64748b; margin-bottom: 2.5rem; font-size: .95rem; }
+
+    section { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+              padding: 1.5rem; margin-bottom: 1.5rem; }
+    section h2 { font-size: 1rem; font-weight: 700; margin-bottom: 1rem;
+                 padding-bottom: .5rem; border-bottom: 1px solid #f1f5f9; }
+
+    .row { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: .75rem; }
+    .row:last-child { margin-bottom: 0; }
+    label { font-size: .85rem; font-weight: 600; color: #374151; min-width: 80px; }
+
+    input[type=text], input[type=email], input[type=number],
+    input[type=range], input[type=date], select, textarea {
+      padding: .4rem .75rem; border: 1px solid #d1d5db;
+      border-radius: 8px; font-size: .9rem; font-family: inherit;
+      transition: border-color .15s; outline: none; flex: 1;
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: #6366f1; box-shadow: 0 0 0 3px #eef2ff;
+    }
+    textarea { min-height: 80px; resize: vertical; }
+
+    .output {
+      flex: 1; padding: .4rem .75rem; background: #f8fafc;
+      border: 1px dashed #e2e8f0; border-radius: 8px;
+      font-size: .9rem; color: #475569; font-family: monospace;
+      min-height: 2rem; word-break: break-all;
+    }
+
+    input[type=range] { padding: 0; }
+    input[type=checkbox], input[type=radio] { width: 16px; height: 16px; accent-color: #6366f1; }
+
+    .preview {
+      padding: 1rem; background: #f8fafc; border: 1px solid #e2e8f0;
+      border-radius: 8px; font-size: .9rem; line-height: 1.7; margin-top: 1rem;
+    }
+    .preview strong { color: #6366f1; }
+
+    #build-error code { background: #f3f4f6; padding: .2rem .4rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+
+  <!-- Requires: npm run build  (generates dist/entropy.min.js) -->
+
+  <h1>Two-way binding with <code>en-model</code></h1>
+  <p class="lead">
+    Add <code>en-model="key"</code> to any input — no <code>oninput</code> handlers needed.
+    The directive keeps data and DOM in sync automatically.
+  </p>
+
+  <!-- Text inputs -->
+  <section>
+    <h2>Text, email, number</h2>
+
+    <div class="row">
+      <label>Text</label>
+      <input type="text" en-model="text" placeholder="Type something…" />
+      <span class="output" en-mark="text"></span>
+    </div>
+
+    <div class="row">
+      <label>Email</label>
+      <input type="email" en-model="email" placeholder="you@example.com" />
+      <span class="output" en-mark="email"></span>
+    </div>
+
+    <div class="row">
+      <label>Number</label>
+      <input type="number" en-model="qty" placeholder="0" />
+      <span class="output" en-mark="qty"></span>
+    </div>
+  </section>
+
+  <!-- Range -->
+  <section>
+    <h2>Range</h2>
+    <div class="row">
+      <label>Volume</label>
+      <input type="range" en-model="volume" min="0" max="100" />
+      <span class="output" en-mark="volume"></span>
+    </div>
+  </section>
+
+  <!-- Checkbox & radio -->
+  <section>
+    <h2>Checkbox &amp; radio</h2>
+
+    <div class="row">
+      <label>Agree</label>
+      <input type="checkbox" en-model="agreed" />
+      <span class="output" en-mark="agreed"></span>
+    </div>
+
+    <div class="row">
+      <label>Size</label>
+      <label style="min-width:auto;font-weight:400;display:flex;gap:.4rem;align-items:center">
+        <input type="radio" en-model="size" value="S" name="size" /> S
+      </label>
+      <label style="min-width:auto;font-weight:400;display:flex;gap:.4rem;align-items:center">
+        <input type="radio" en-model="size" value="M" name="size" /> M
+      </label>
+      <label style="min-width:auto;font-weight:400;display:flex;gap:.4rem;align-items:center">
+        <input type="radio" en-model="size" value="L" name="size" /> L
+      </label>
+      <span class="output" en-mark="size"></span>
+    </div>
+  </section>
+
+  <!-- Select -->
+  <section>
+    <h2>Select</h2>
+    <div class="row">
+      <label>Country</label>
+      <select en-model="country">
+        <option value="">— pick one —</option>
+        <option value="pl">Poland</option>
+        <option value="de">Germany</option>
+        <option value="fr">France</option>
+        <option value="gb">United Kingdom</option>
+      </select>
+      <span class="output" en-mark="country"></span>
+    </div>
+  </section>
+
+  <!-- Textarea -->
+  <section>
+    <h2>Textarea</h2>
+    <div class="row" style="align-items:flex-start">
+      <label>Bio</label>
+      <textarea en-model="bio" placeholder="Write something…"></textarea>
+    </div>
+  </section>
+
+  <!-- Live preview using computed -->
+  <section>
+    <h2>Live preview — computed from all fields</h2>
+    <div class="preview" en-mark="summary"></div>
+  </section>
+
+<script src="https://unpkg.com/uentropy/dist/entropy.min.js" onerror="
+  document.body.innerHTML = '<div id=build-error style=padding:2rem><h2>⚠️ Build required</h2><p>Run <code>npm run build</code> in the project root, then reload.</p></div>';
+"></script>
+<script>
+  const en = UEntropy.default;
+  window.data = en.init();
+
+  data.text    = '';
+  data.email   = '';
+  data.qty     = 0;
+  data.volume  = 50;
+  data.agreed  = false;
+  data.size    = 'M';
+  data.country = '';
+  data.bio     = '';
+
+  data.summary = en.computed(() => {
+    const lines = [];
+    if (data.text)    lines.push(`Text: ${data.text}`);
+    if (data.email)   lines.push(`Email: ${data.email}`);
+    if (data.qty)     lines.push(`Qty: ${data.qty}`);
+                      lines.push(`Volume: ${data.volume}`);
+                      lines.push(`Agreed: ${data.agreed}`);
+                      lines.push(`Size: ${data.size}`);
+    if (data.country) lines.push(`Country: ${data.country}`);
+    if (data.bio)     lines.push(`Bio: ${data.bio}`);
+    return lines.join('\n') || '(fill in some fields above)';
+  });
+</script>
+</body>
+</html>

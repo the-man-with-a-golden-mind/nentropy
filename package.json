@@ -1,0 +1,33 @@
+{
+  "name": "entropyrs",
+  "version": "1.0.0",
+  "description": "uentropy rewritten in ReScript – reactive DOM library",
+  "author": "Michal Majchrzak",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "res:build": "rescript build",
+    "res:clean": "rescript clean",
+    "res:watch": "rescript build -w",
+    "build": "npm run res:build && node build.mjs",
+    "test": "npm run res:build && vitest run",
+    "test:watch": "vitest",
+    "bench": "node benchmark.mjs",
+    "bench:browser": "echo 'Open benchmark.html in a browser (needs both dist/ builds)'"
+  },
+  "devDependencies": {
+    "rescript": "^12.2.0",
+    "vitest": "^2.1.0",
+    "happy-dom": "^15.7.0",
+    "esbuild": "^0.24.0"
+  }
+}

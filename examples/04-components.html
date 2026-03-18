@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>entropy – Web Components</title>
+  <style>
+    body { font-family: sans-serif; max-width: 560px; margin: 4rem auto; }
+    input, select { padding: .4rem; font-size: 1rem; margin: .25rem 0; }
+    button { padding: .4rem .8rem; font-size: 1rem; cursor: pointer; }
+    #build-error code { background: #f3f4f6; padding: .2rem .4rem; border-radius: 4px; }
+  </style>
+
+  <template name="user-card">
+    <style>
+      :host { display: block; border: 1px solid #ddd; border-radius: 8px;
+              padding: 1rem; margin: .5rem 0; font-family: sans-serif; }
+      .name { font-size: 1.2rem; font-weight: bold; }
+      .role { font-size: .85rem; color: #888; margin-top: .2rem; }
+    </style>
+    <div class="name"><slot name="name">Unknown</slot></div>
+    <div class="role"><slot name="role">Member</slot></div>
+    <slot></slot>
+  </template>
+
+  <template name="status-pill">
+    <style>
+      :host { display: inline-block; }
+      .pill { padding: .2rem .7rem; border-radius: 999px; font-size: .8rem;
+              font-weight: bold; color: #fff; background: #aaa; }
+      :host([status="online"])  .pill { background: #22c55e; }
+      :host([status="away"])    .pill { background: #f59e0b; }
+      :host([status="offline"]) .pill { background: #ef4444; }
+    </style>
+    <span class="pill"><slot>offline</slot></span>
+  </template>
+</head>
+<body>
+  <!-- Requires: npm run build  (generates dist/entropy.min.js) -->
+
+  <h1>Web Components</h1>
+  <p>Named <code>&lt;template&gt;</code> elements become custom elements automatically.</p>
+
+  <div style="margin:1rem 0; display:flex; gap:.5rem; flex-wrap:wrap">
+    <input type="text"
+      placeholder="Name"
+      oninput="data.card.name = this.value"
+      en-mark="card.name"
+    />
+    <input type="text"
+      placeholder="Role"
+      oninput="data.card.role = this.value"
+      en-mark="card.role"
+    />
+    <select onchange="data.card.status = this.value">
+      <option value="online">Online</option>
+      <option value="away">Away</option>
+      <option value="offline">Offline</option>
+    </select>
+  </div>
+
+  <user-card>
+    <span slot="name" en-mark="card.name">Alice</span>
+    <span slot="role" en-mark="card.role">Engineer</span>
+    <p>
+      Status:
+      <!--
+        en-attr is a custom directive defined below that sets an arbitrary
+        HTML attribute reactively — here used to drive the CSS :host([status])
+        selector on the status-pill shadow root.
+      -->
+      <status-pill en-attr="card.status:status">
+        <span en-mark="card.status">online</span>
+      </status-pill>
+    </p>
+  </user-card>
+
+  <script src="https://unpkg.com/uentropy/dist/entropy.min.js" onerror="
+    document.body.innerHTML = '<div id=build-error><h2>⚠️ Build required</h2><p>Run <code>npm run build</code> in the project root, then reload.</p></div>';
+  "></script>
+  <script>
+    const en = UEntropy.default;
+
+    // Custom parametric directive: en-attr="key:attribute-name"
+    // Sets any HTML attribute reactively — no getElementById needed.
+    en.directive('attr', ({ el, value, param }) => {
+      if (param) el.setAttribute(param, String(value));
+    }, true /* parametric */);
+
+    window.data = en.init();
+    data.card = { name: 'Alice', role: 'Engineer', status: 'online' };
+  </script>
+</body>
+</html>

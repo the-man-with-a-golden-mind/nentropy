@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>entropy vs Preact – Benchmark</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f8fafc; color: #0f172a; }
+
+    header { background: #0f172a; color: #f8fafc; padding: 1.5rem 2rem; }
+    header h1 { font-size: 1.4rem; font-weight: 700; }
+    header p  { font-size: .875rem; color: #94a3b8; margin-top: .25rem; }
+
+    main { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem; }
+
+    /* ── Controls ── */
+    .controls {
+      display: flex; flex-wrap: wrap; gap: 1rem;
+      background: #fff; border: 1px solid #e2e8f0;
+      border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem;
+    }
+    .control-group { display: flex; flex-direction: column; gap: .4rem; }
+    .control-group label { font-size: .75rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .05em; }
+    .control-group select,
+    .control-group input[type=number] {
+      padding: .4rem .75rem; border: 1px solid #cbd5e1; border-radius: 6px;
+      font-size: .9rem; min-width: 140px;
+    }
+    .run-btn {
+      align-self: flex-end; padding: .5rem 1.75rem;
+      background: #6366f1; color: #fff; border: none;
+      border-radius: 8px; font-size: .95rem; font-weight: 600;
+      cursor: pointer; transition: background .15s;
+    }
+    .run-btn:hover { background: #4f46e5; }
+    .run-btn:disabled { background: #a5b4fc; cursor: not-allowed; }
+
+    /* ── Results grid ── */
+    .results {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .card {
+      background: #fff; border: 1px solid #e2e8f0;
+      border-radius: 12px; overflow: hidden;
+    }
+    .card-header {
+      display: flex; align-items: center; gap: .75rem;
+      padding: 1rem 1.25rem; border-bottom: 1px solid #e2e8f0;
+    }
+    .card-header .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+    }
+    .dot-entropy { background: #6366f1; }
+    .dot-preact  { background: #06b6d4; }
+    .card-header h2 { font-size: 1rem; font-weight: 700; }
+    .card-header .version { font-size: .75rem; color: #94a3b8; margin-left: auto; }
+
+    .metrics { padding: 1.25rem; display: flex; flex-direction: column; gap: .75rem; }
+    .metric { display: flex; justify-content: space-between; align-items: center; }
+    .metric-label { font-size: .85rem; color: #475569; }
+    .metric-value { font-size: 1rem; font-weight: 700; color: #0f172a; }
+    .metric-value.pending { color: #94a3b8; font-weight: 400; }
+    .metric-bar-wrap { height: 6px; background: #f1f5f9; border-radius: 3px; margin-top: .25rem; }
+    .metric-bar { height: 100%; border-radius: 3px; transition: width .4s ease; }
+    .bar-entropy { background: #6366f1; }
+    .bar-preact  { background: #06b6d4; }
+
+    /* ── Winner banner ── */
+    .winner {
+      display: none; background: #fff; border: 1px solid #e2e8f0;
+      border-radius: 12px; padding: 1.25rem 1.5rem;
+      margin-bottom: 1.5rem; font-size: .95rem;
+    }
+    .winner.show { display: flex; align-items: center; gap: 1rem; }
+    .winner .trophy { font-size: 1.75rem; }
+    .winner strong { font-weight: 700; }
+    .winner .speedup { color: #6366f1; font-weight: 700; }
+
+    /* ── Log ── */
+    .log-wrap {
+      background: #0f172a; border-radius: 12px; padding: 1.25rem;
+      font-family: 'Menlo', monospace; font-size: .78rem;
+      color: #94a3b8; max-height: 180px; overflow-y: auto;
+    }
+    .log-wrap .line { line-height: 1.6; }
+    .log-wrap .line.ok   { color: #86efac; }
+    .log-wrap .line.info { color: #7dd3fc; }
+    .log-wrap .line.head { color: #e2e8f0; font-weight: bold; }
+
+    /* ── Sandboxes (hidden render targets) ── */
+    #entropy-sandbox,
+    #preact-sandbox { display: none; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>entropy vs Preact — Performance Benchmark</h1>
+  <p>Runs identical workloads in both frameworks and measures wall-clock time.</p>
+</header>
+
+<main>
+
+  <!-- Controls -->
+  <div class="controls">
+    <div class="control-group">
+      <label>Benchmark</label>
+      <select id="benchSelect">
+        <option value="create">Create N rows</option>
+        <option value="update">Update every 10th row</option>
+        <option value="replace">Replace all rows</option>
+        <option value="delete">Delete all rows</option>
+        <option value="swap">Swap 2 rows</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label>Row count</label>
+      <select id="rowCount">
+        <option value="100">100</option>
+        <option value="500">500</option>
+        <option value="1000" selected>1 000</option>
+        <option value="2000">2 000</option>
+        <option value="5000">5 000</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label>Runs (avg)</label>
+      <select id="runs">
+        <option value="1">1</option>
+        <option value="3" selected>3</option>
+        <option value="5">5</option>
+        <option value="10">10</option>
+      </select>
+    </div>
+    <button class="run-btn" id="runBtn" onclick="runBenchmark()">▶ Run</button>
+  </div>
+
+  <!-- Winner -->
+  <div class="winner" id="winner">
+    <span class="trophy">🏆</span>
+    <span id="winnerText"></span>
+  </div>
+
+  <!-- Results -->
+  <div class="results">
+    <div class="card">
+      <div class="card-header">
+        <span class="dot dot-entropy"></span>
+        <h2>entropy</h2>
+        <span class="version" id="entropyVersion">—</span>
+      </div>
+      <div class="metrics" id="entropyMetrics">
+        <div class="metric">
+          <span class="metric-label">Avg time</span>
+          <span class="metric-value pending" id="e-avg">—</span>
+        </div>
+        <div class="metric-bar-wrap"><div class="metric-bar bar-entropy" id="e-bar" style="width:0%"></div></div>
+        <div class="metric">
+          <span class="metric-label">Min</span>
+          <span class="metric-value pending" id="e-min">—</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Max</span>
+          <span class="metric-value pending" id="e-max">—</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Operations / sec</span>
+          <span class="metric-value pending" id="e-ops">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="dot dot-preact"></span>
+        <h2>Preact</h2>
+        <span class="version" id="preactVersion">—</span>
+      </div>
+      <div class="metrics" id="preactMetrics">
+        <div class="metric">
+          <span class="metric-label">Avg time</span>
+          <span class="metric-value pending" id="p-avg">—</span>
+        </div>
+        <div class="metric-bar-wrap"><div class="metric-bar bar-preact" id="p-bar" style="width:0%"></div></div>
+        <div class="metric">
+          <span class="metric-label">Min</span>
+          <span class="metric-value pending" id="p-min">—</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Max</span>
+          <span class="metric-value pending" id="p-max">—</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Operations / sec</span>
+          <span class="metric-value pending" id="p-ops">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="log-wrap" id="log"></div>
+
+  <!-- Hidden render targets -->
+  <div id="entropy-sandbox"></div>
+  <div id="preact-sandbox"></div>
+</main>
+
+<!-- Preact from CDN (UMD build – no import needed) -->
+<script src="https://cdn.jsdelivr.net/npm/preact@10/dist/preact.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/preact@10/hooks/dist/hooks.umd.js"></script>
+
+<!-- entropy IIFE build -->
+<script src="https://unpkg.com/uentropy/dist/entropy.min.js" onerror="
+  document.body.innerHTML = '<div style=font:1rem sans-serif;padding:2rem><h2>⚠️ Build required</h2><p>Run <code style=background:#f3f4f6;padding:.2rem .4rem;border-radius:4px>npm run build</code> in the project root, then reload.</p></div>';
+"></script>
+
+<script>
+// ─── Utilities ────────────────────────────────────────────────────────────────
+
+const $ = id => document.getElementById(id);
+
+function log(msg, cls = '') {
+  const el = document.createElement('div');
+  el.className = 'line ' + cls;
+  el.textContent = msg;
+  $('log').appendChild(el);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+function ms(n) { return n.toFixed(2) + ' ms'; }
+function ops(avgMs, count) {
+  return Math.round((count / avgMs) * 1000).toLocaleString() + ' / sec';
+}
+
+function buildRows(n) {
+  return Array.from({ length: n }, (_, i) => ({
+    id: i + 1,
+    label: adjectives[i % adjectives.length] + ' ' + nouns[i % nouns.length],
+  }));
+}
+
+// pause between runs so browser can paint / GC
+const frame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+// ─── Word lists (like js-framework-benchmark) ─────────────────────────────────
+
+const adjectives = ['pretty','large','big','small','tall','short','long','handsome',
+  'plain','quaint','clean','elegant','easy','angry','crazy','helpful','mushy',
+  'odd','unsightly','adorable','important','inexpensive','cheap','expensive','fancy'];
+const nouns = ['table','chair','house','bbq','desk','car','pony','cookie',
+  'sandwich','burger','pizza','mouse','keyboard','monitor','phone','tablet',
+  'laptop','charger','cable','speaker','headphone','camera','watch','pen','book'];
+
+// ─── entropy benchmark suite ──────────────────────────────────────────────────
+
+function setupEntropy(n) {
+  const sandbox = $('entropy-sandbox');
+  sandbox.innerHTML = `
+    <table>
+      <tbody>
+        <tr en-mark="rows.#">
+          <td en-mark="rows.#.id"></td>
+          <td en-mark="rows.#.label"></td>
+        </tr>
+      </tbody>
+    </table>`;
+
+  const en = UEntropy.createInstance();
+  const data = en.init();
+  data.rows = buildRows(n);
+
+  return { en, data, sandbox };
+}
+
+function teardownEntropy({ en, sandbox }) {
+  en.destroy();
+  sandbox.innerHTML = '';
+}
+
+const entropyBenches = {
+  create(n) {
+    const { en, data, sandbox } = setupEntropy(0);
+    return {
+      run() { data.rows = buildRows(n); },
+      after() { teardownEntropy({ en, sandbox }); },
+    };
+  },
+  update(n) {
+    const { en, data, sandbox } = setupEntropy(n);
+    return {
+      run() {
+        for (let i = 0; i < data.rows.length; i += 10) {
+          data.rows[i].label += ' !!!';
+        }
+      },
+      after() { teardownEntropy({ en, sandbox }); },
+    };
+  },
+  replace(n) {
+    const { en, data, sandbox } = setupEntropy(n);
+    return {
+      run() { data.rows = buildRows(n); },
+      after() { teardownEntropy({ en, sandbox }); },
+    };
+  },
+  delete(n) {
+    const { en, data, sandbox } = setupEntropy(n);
+    return {
+      run() {
+        // batch() queues all DOM work and flushes once —
+        // equivalent to Preact's single setState([]) call.
+        en.batch(() => { data.rows = []; });
+      },
+      after() { teardownEntropy({ en, sandbox }); },
+    };
+  },
+  swap(n) {
+    const { en, data, sandbox } = setupEntropy(n);
+    return {
+      run() {
+        const tmp = data.rows[1];
+        data.rows[1] = data.rows[data.rows.length - 2];
+        data.rows[data.rows.length - 2] = tmp;
+      },
+      after() { teardownEntropy({ en, sandbox }); },
+    };
+  },
+};
+
+// ─── Preact benchmark suite ───────────────────────────────────────────────────
+
+const { h, render, Component } = preact;
+const { useState } = preactHooks;
+
+function PreactApp({ initialRows }) {
+  const [rows, setRows] = useState(initialRows);
+  window.__preactSetRows = setRows;
+  window.__preactGetRows = () => rows;
+
+  return h('table', null,
+    h('tbody', null,
+      rows.map(r =>
+        h('tr', { key: r.id },
+          h('td', null, r.id),
+          h('td', null, r.label),
+        )
+      )
+    )
+  );
+}
+
+function setupPreact(n) {
+  const sandbox = $('preact-sandbox');
+  const initialRows = buildRows(n);
+  render(h(PreactApp, { initialRows }), sandbox);
+  return { sandbox };
+}
+
+function teardownPreact({ sandbox }) {
+  render(null, sandbox);
+}
+
+const preactBenches = {
+  create(n) {
+    const sandbox = $('preact-sandbox');
+    render(h(PreactApp, { initialRows: [] }), sandbox);
+    return {
+      run() { window.__preactSetRows(buildRows(n)); },
+      after() { teardownPreact({ sandbox }); },
+    };
+  },
+  update(n) {
+    const setup = setupPreact(n);
+    return {
+      run() {
+        const rows = window.__preactGetRows();
+        const next = rows.map((r, i) =>
+          i % 10 === 0 ? { ...r, label: r.label + ' !!!' } : r
+        );
+        window.__preactSetRows(next);
+      },
+      after() { teardownPreact(setup); },
+    };
+  },
+  replace(n) {
+    const setup = setupPreact(n);
+    return {
+      run() { window.__preactSetRows(buildRows(n)); },
+      after() { teardownPreact(setup); },
+    };
+  },
+  delete(n) {
+    const setup = setupPreact(n);
+    return {
+      run() { window.__preactSetRows([]); },
+      after() { teardownPreact(setup); },
+    };
+  },
+  swap(n) {
+    const setup = setupPreact(n);
+    return {
+      run() {
+        const rows = [...window.__preactGetRows()];
+        const tmp  = rows[1];
+        rows[1]    = rows[rows.length - 2];
+        rows[rows.length - 2] = tmp;
+        window.__preactSetRows(rows);
+      },
+      after() { teardownPreact(setup); },
+    };
+  },
+};
+
+// ─── Runner ───────────────────────────────────────────────────────────────────
+
+async function measure(name, benchFn, n, runsCount) {
+  const times = [];
+  for (let r = 0; r < runsCount; r++) {
+    const bench = benchFn(n);
+    await frame();
+    const t0 = performance.now();
+    bench.run();
+    await frame(); // wait for paint
+    times.push(performance.now() - t0);
+    bench.after?.();
+    await frame();
+    log(`  ${name} run ${r + 1}/${runsCount}: ${ms(times[times.length - 1])}`, 'ok');
+  }
+  const avg = times.reduce((a, b) => a + b, 0) / times.length;
+  const min = Math.min(...times);
+  const max = Math.max(...times);
+  return { avg, min, max };
+}
+
+function setMetrics(prefix, { avg, min, max }, n) {
+  $(prefix + '-avg').textContent = ms(avg);
+  $(prefix + '-avg').classList.remove('pending');
+  $(prefix + '-min').textContent = ms(min);
+  $(prefix + '-min').classList.remove('pending');
+  $(prefix + '-max').textContent = ms(max);
+  $(prefix + '-max').classList.remove('pending');
+  $(prefix + '-ops').textContent = ops(avg, n);
+  $(prefix + '-ops').classList.remove('pending');
+}
+
+function resetMetrics() {
+  for (const id of ['e-avg','e-min','e-max','e-ops','p-avg','p-min','p-max','p-ops']) {
+    $(id).textContent = '…';
+    $(id).classList.add('pending');
+  }
+  $('e-bar').style.width = '0%';
+  $('p-bar').style.width = '0%';
+  $('winner').classList.remove('show');
+  $('log').innerHTML = '';
+}
+
+async function runBenchmark() {
+  const bench  = $('benchSelect').value;
+  const n      = +$('rowCount').value;
+  const runsN  = +$('runs').value;
+  const btn    = $('runBtn');
+
+  btn.disabled = true;
+  resetMetrics();
+
+  log(`▶ Benchmark: "${bench}" — ${n} rows × ${runsN} runs`, 'head');
+
+  log('Running entropy…', 'info');
+  const eResult = await measure('entropy', entropyBenches[bench], n, runsN);
+  setMetrics('e', eResult, n);
+
+  log('Running Preact…', 'info');
+  const pResult = await measure('Preact', preactBenches[bench], n, runsN);
+  setMetrics('p', pResult, n);
+
+  // ── Bars (relative to slower) ──────────────────────────────────────────────
+  const maxAvg = Math.max(eResult.avg, pResult.avg);
+  $('e-bar').style.width = ((eResult.avg / maxAvg) * 100).toFixed(1) + '%';
+  $('p-bar').style.width = ((pResult.avg / maxAvg) * 100).toFixed(1) + '%';
+
+  // ── Winner ─────────────────────────────────────────────────────────────────
+  const faster   = eResult.avg < pResult.avg ? 'entropy' : 'Preact';
+  const slower   = faster === 'entropy' ? 'Preact' : 'entropy';
+  const ratio    = (Math.max(eResult.avg, pResult.avg) / Math.min(eResult.avg, pResult.avg)).toFixed(2);
+  const winnerEl = $('winner');
+  winnerEl.classList.add('show');
+  $('winnerText').innerHTML =
+    `<strong>${faster}</strong> wins — <span class="speedup">${ratio}×</span> faster than ${slower} on average.`;
+
+  log(`✓ Done. ${faster} wins by ${ratio}×`, 'head');
+  btn.disabled = false;
+}
+
+// ─── Version labels ───────────────────────────────────────────────────────────
+$('entropyVersion').textContent = 'v1.0.0';
+$('preactVersion').textContent  = 'v' + (preact.version ?? '10.x');
+</script>
+</body>
+</html>

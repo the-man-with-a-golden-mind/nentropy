@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>uentropy – Feature Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f8fafc; color: #0f172a; padding: 2rem; }
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 1.5rem; }
+    h2 { font-size: .85rem; font-weight: 700; text-transform: uppercase;
+         letter-spacing: .06em; color: #64748b; margin-bottom: .75rem; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1.25rem; }
+    .card h2 { margin-bottom: .75rem; }
+
+    button { padding: .3rem .8rem; cursor: pointer; border: 1px solid #cbd5e1;
+             border-radius: 6px; background: #fff; font-size: .85rem; }
+    button:hover { background: #f1f5f9; }
+    input, select { padding: .35rem .6rem; border: 1px solid #cbd5e1; border-radius: 6px;
+                    font-size: .85rem; width: 100%; margin-bottom: .4rem; outline: none; }
+    input:focus, select:focus { border-color: #6366f1; }
+
+    .val { font-family: monospace; font-size: .85rem; background: #f1f5f9;
+           padding: .2rem .5rem; border-radius: 4px; display: inline-block; }
+    .ok  { color: #16a34a; font-weight: 600; }
+    .err { color: #dc2626; font-weight: 600; }
+
+    ul { list-style: none; }
+    li { padding: .2rem 0; border-bottom: 1px solid #f1f5f9; font-size: .9rem; }
+    li:last-child { border: none; }
+
+    .result { margin-top: .75rem; font-size: .85rem; min-height: 1.4rem; }
+
+    /* en-if multi-child */
+    .pill { display: inline-block; background: #6366f1; color: #fff;
+            padding: .15rem .5rem; border-radius: 999px; font-size: .75rem; margin-right: .3rem; }
+  </style>
+</head>
+<body>
+  <h1>uentropy — Feature Test</h1>
+  <p style="font-size:.85rem;color:#64748b;margin-bottom:1.5rem">
+    Open DevTools console for watch logs. Each card tests one feature.
+  </p>
+
+  <div class="grid">
+
+    <!-- 1. en-mark primitive -->
+    <div class="card">
+      <h2>en-mark — primitive</h2>
+      <button onclick="data.counter--">−</button>
+      <button onclick="data.counter++">+</button>
+      <div class="result">Value: <span class="val" en-mark="counter">0</span></div>
+    </div>
+
+    <!-- 2. en-mark nested -->
+    <div class="card">
+      <h2>en-mark — nested object</h2>
+      <button onclick="data.user.name = 'Alice'">Alice</button>
+      <button onclick="data.user.name = 'Bob'">Bob</button>
+      <button onclick="data.user.score++">Score+</button>
+      <div class="result">
+        <span en-mark="user.name"></span> — score: <span class="val" en-mark="user.score">0</span>
+      </div>
+    </div>
+
+    <!-- 3. en-mark object → JSON -->
+    <div class="card">
+      <h2>en-mark — object serialises to JSON</h2>
+      <button onclick="data.obj = { x: Math.floor(Math.random()*100), y: Math.floor(Math.random()*100) }">
+        Randomise
+      </button>
+      <div class="result"><code en-mark="obj" style="font-size:.8rem;word-break:break-all"></code></div>
+    </div>
+
+    <!-- 4. en-model text -->
+    <div class="card">
+      <h2>en-model — text input</h2>
+      <input en-model="draft" placeholder="Type something…" />
+      <div class="result">Reactive: <span class="val" en-mark="draft"></span></div>
+    </div>
+
+    <!-- 5. en-model checkbox + select -->
+    <div class="card">
+      <h2>en-model — checkbox &amp; select</h2>
+      <label style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem">
+        <input type="checkbox" en-model="agreed" /> Agreed:
+        <span class="val" en-mark="agreed"></span>
+      </label>
+      <select en-model="color">
+        <option value="red">Red</option>
+        <option value="green">Green</option>
+        <option value="blue">Blue</option>
+      </select>
+      <div class="result">Color: <span class="val" en-mark="color"></span></div>
+    </div>
+
+    <!-- 6. en-if / en-ifnot single child -->
+    <div class="card">
+      <h2>en-if / en-ifnot — single child</h2>
+      <button onclick="data.visible = !data.visible">Toggle</button>
+      <div class="result">
+        <template en-if="visible"><span class="ok">✓ Visible</span></template>
+        <template en-ifnot="visible"><span class="err">✗ Hidden</span></template>
+      </div>
+    </div>
+
+    <!-- 7. en-if multi-child (the bug we fixed) -->
+    <div class="card">
+      <h2>en-if — multiple root children</h2>
+      <button onclick="data.showBadges = !data.showBadges">Toggle badges</button>
+      <div class="result" style="margin-top:.5rem">
+        <template en-if="showBadges">
+          <span class="pill">Alpha</span>
+          <span class="pill">Beta</span>
+          <span class="pill">Gamma</span>
+        </template>
+        <template en-ifnot="showBadges">
+          <span style="color:#94a3b8">Badges hidden</span>
+        </template>
+      </div>
+    </div>
+
+    <!-- 8. String array -->
+    <div class="card">
+      <h2>Array — strings</h2>
+      <button onclick="data.fruits.push('fruit' + (++window._fc))">Push</button>
+      <button onclick="data.fruits.splice(0,1)">Splice first</button>
+      <button onclick="data.fruits = ['apple','banana']">Reset</button>
+      <ul style="margin-top:.5rem">
+        <li en-mark="fruits.#"></li>
+      </ul>
+      <template en-ifnot="fruits.length">
+        <p style="color:#94a3b8;font-size:.85rem;margin-top:.4rem">Empty</p>
+      </template>
+    </div>
+
+    <!-- 9. Object array -->
+    <div class="card">
+      <h2>Array — objects with nested keys</h2>
+      <button onclick="data.people.push({ name:'Person'+( ++window._pc), age: 20+window._pc })">Add</button>
+      <button onclick="data.people.splice(0,1)">Remove first</button>
+      <ul style="margin-top:.5rem">
+        <li en-mark="people.#">
+          <strong en-mark="people.#.name"></strong>
+          — age <span en-mark="people.#.age"></span>
+        </li>
+      </ul>
+    </div>
+
+    <!-- 10. en.computed sync -->
+    <div class="card">
+      <h2>en.computed — sync</h2>
+      <input en-model="first" placeholder="First name" />
+      <input en-model="last"  placeholder="Last name" />
+      <div class="result">Full: <span class="val" en-mark="fullName"></span></div>
+    </div>
+
+    <!-- 11. en.computed async -->
+    <div class="card">
+      <h2>en.computed — async</h2>
+      <select onchange="data.postId = +this.value">
+        <option value="1">Post 1</option>
+        <option value="2">Post 2</option>
+        <option value="3">Post 3</option>
+      </select>
+      <template en-if="loading"><p style="color:#94a3b8;font-size:.85rem">Loading…</p></template>
+      <template en-ifnot="loading">
+        <div style="font-size:.85rem;margin-top:.4rem">
+          <strong en-mark="post.title" style="display:block;margin-bottom:.2rem"></strong>
+          <span en-mark="post.body" style="color:#64748b;font-size:.75rem;display:block;
+            overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical"></span>
+        </div>
+      </template>
+    </div>
+
+    <!-- 12. en.watch -->
+    <div class="card">
+      <h2>en.watch</h2>
+      <button onclick="data.ping++">Ping</button>
+      <div class="result">
+        Pings: <span class="val" en-mark="ping">0</span> —
+        Log: <span en-mark="watchLog" style="font-size:.8rem;color:#6366f1"></span>
+      </div>
+    </div>
+
+    <!-- 13. en.batch -->
+    <div class="card">
+      <h2>en.batch</h2>
+      <button onclick="runBatch()">Batch update</button>
+      <div class="result" style="font-size:.85rem">
+        A: <span class="val" en-mark="batchA"></span>
+        B: <span class="val" en-mark="batchB"></span>
+        C: <span class="val" en-mark="batchC"></span>
+      </div>
+    </div>
+
+    <!-- 14. delete -->
+    <div class="card">
+      <h2>delete data.key</h2>
+      <button onclick="data.msg = 'Hello!'">Set</button>
+      <button onclick="delete data.msg">Delete</button>
+      <div class="result">
+        <template en-if="msg"><span en-mark="msg"></span></template>
+        <template en-ifnot="msg"><span style="color:#94a3b8">deleted</span></template>
+      </div>
+    </div>
+
+    <!-- 15. custom directive -->
+    <div class="card">
+      <h2>Custom directive — en-bg</h2>
+      <button onclick="data.bgColor = '#6366f1'">Indigo</button>
+      <button onclick="data.bgColor = '#16a34a'">Green</button>
+      <button onclick="data.bgColor = '#dc2626'">Red</button>
+      <div en-bg="bgColor" class="result"
+           style="text-align:center;padding:.75rem;border-radius:6px;color:#fff;margin-top:.5rem;transition:background .3s">
+        background color
+      </div>
+    </div>
+
+  </div>
+
+  <script src="../dist/entropy.min.js" onerror="
+    document.body.innerHTML = '<div style=padding:2rem><h2>⚠️ Run npm run build first</h2></div>';
+  "></script>
+  <script>
+    const en = UEntropy.default;
+
+    // Custom directive
+    en.directive('bg', ({ el, value }) => {
+      el.style.background = String(value || '#e2e8f0');
+    });
+
+    window.data = en.init();
+    window._fc = 0; // fruit counter
+    window._pc = 0; // people counter
+
+    // ── Initial state ──────────────────────────────────────────────────────
+    data.counter     = 0;
+    data.user        = { name: 'Alice', score: 0 };
+    data.obj         = { x: 1, y: 2 };
+    data.draft       = '';
+    data.agreed      = false;
+    data.color       = 'red';
+    data.visible     = true;
+    data.showBadges  = true;
+    data.fruits      = ['apple', 'banana', 'cherry'];
+    data.people      = [{ name: 'Alice', age: 28 }, { name: 'Bob', age: 34 }];
+    data.first       = '';
+    data.last        = '';
+    data.postId      = 1;
+    data.loading     = false;
+    data.post        = {};
+    data.ping        = 0;
+    data.watchLog    = '—';
+    data.batchA      = '—';
+    data.batchB      = '—';
+    data.batchC      = '—';
+    data.msg         = '';
+    data.bgColor     = '#6366f1';
+
+    // ── Computed ───────────────────────────────────────────────────────────
+    data.fullName = en.computed(() =>
+      [data.first, data.last].filter(Boolean).join(' ') || '—'
+    );
+
+    data.post = en.computed(async () => {
+      data.loading = true;
+      try {
+        const r = await fetch('https://jsonplaceholder.typicode.com/posts/' + data.postId);
+        return await r.json();
+      } finally {
+        data.loading = false;
+      }
+    });
+
+    // ── Watch ──────────────────────────────────────────────────────────────
+    en.watch('ping', v => {
+      data.watchLog = 'fired ' + v;
+      console.log('[watch] ping =', v);
+    });
+
+    // ── Batch ──────────────────────────────────────────────────────────────
+    window.runBatch = () => {
+      en.batch(() => {
+        data.batchA = Math.floor(Math.random() * 100);
+        data.batchB = Math.floor(Math.random() * 100);
+        data.batchC = Math.floor(Math.random() * 100);
+      });
+    };
+  </script>
+</body>
+</html>

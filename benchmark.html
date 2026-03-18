@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>uentropy Benchmark — TypeScript vs ReScript</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0f172a; color: #e2e8f0; padding: 2rem;
+      max-width: 1100px; margin: 0 auto;
+    }
+    h1 { font-size: 1.5rem; color: #a5b4fc; margin-bottom: .5rem; }
+    .subtitle { color: #64748b; font-size: .85rem; margin-bottom: 2rem; }
+    .controls { display: flex; gap: 10px; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    button {
+      padding: 8px 18px; font-size: 13px; font-weight: 600; cursor: pointer;
+      border: 1px solid #4338ca; border-radius: 6px;
+      background: #312e81; color: #c7d2fe; transition: background .15s;
+    }
+    button:hover { background: #3730a3; }
+    button:disabled { opacity: .4; cursor: default; }
+    button.run-all { background: #4338ca; color: #fff; }
+    .status { color: #818cf8; font-size: 12px; padding: 8px 0; min-height: 28px; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 2rem; }
+    thead tr { background: #1e1b4b; }
+    th { padding: 10px 14px; text-align: left; color: #a5b4fc; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+    th:nth-child(n+3) { text-align: right; }
+    td { padding: 8px 14px; border-bottom: 1px solid #1e293b; }
+    td:nth-child(n+3) { text-align: right; font-variant-numeric: tabular-nums; font-family: 'SF Mono', 'Fira Code', monospace; }
+    tr.winner td { background: #1a2e1a; }
+    .faster { color: #4ade80; font-weight: 700; }
+    .slower { color: #f87171; }
+    .tie { color: #94a3b8; }
+    .bar-cell { width: 200px; }
+    .bar-wrap { display: flex; gap: 3px; align-items: center; height: 18px; }
+    .bar { height: 14px; border-radius: 3px; min-width: 2px; transition: width .3s; }
+    .bar.ts { background: #6366f1; }
+    .bar.rs { background: #22d3ee; }
+    .legend { display: flex; gap: 16px; margin-bottom: 1rem; font-size: 12px; color: #94a3b8; }
+    .legend span { display: flex; align-items: center; gap: 5px; }
+    .dot { width: 10px; height: 10px; border-radius: 2px; }
+    .dot.ts { background: #6366f1; }
+    .dot.rs { background: #22d3ee; }
+
+    #sandbox-ts, #sandbox-rs { display: none; }
+
+    .summary {
+      background: #1e1b4b; border-radius: 8px; padding: 1.2rem 1.5rem;
+      font-size: 13px; line-height: 1.7; margin-top: 1rem;
+    }
+    .summary h3 { color: #a5b4fc; margin-bottom: .5rem; }
+    #summary-text { color: #cbd5e1; }
+  </style>
+</head>
+<body>
+
+<h1>⚡ uentropy Benchmark — TypeScript vs ReScript</h1>
+<p class="subtitle">Each benchmark runs the same workload on both implementations, measures wall-clock time (ms). Lower is better. Median of 5 runs.</p>
+
+<div class="legend">
+  <span><span class="dot ts"></span> TypeScript (original)</span>
+  <span><span class="dot rs"></span> ReScript</span>
+</div>
+
+<div class="controls">
+  <button class="run-all" onclick="runAll()">▶ Run All Benchmarks</button>
+  <button onclick="runOne('init')">1. Init</button>
+  <button onclick="runOne('primitives')">2. Primitives</button>
+  <button onclick="runOne('objects')">3. Objects</button>
+  <button onclick="runOne('arrays')">4. Arrays</button>
+  <button onclick="runOne('computed')">5. Computed</button>
+  <button onclick="runOne('watchers')">6. Watchers</button>
+  <button onclick="runOne('directives')">7. Directives</button>
+  <button onclick="runOne('batch')">8. Batch</button>
+  <button onclick="runOne('dom-array')">9. DOM Array</button>
+  <button onclick="runOne('mixed')">10. Mixed Workload</button>
+</div>
+<div class="status" id="status"></div>
+
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Benchmark</th>
+      <th>TS (ms)</th>
+      <th>RS (ms)</th>
+      <th>Δ</th>
+      <th class="bar-cell">Visual</th>
+    </tr>
+  </thead>
+  <tbody id="results"></tbody>
+</table>
+
+<div class="summary">
+  <h3>Summary</h3>
+  <div id="summary-text">Click "Run All Benchmarks" to start.</div>
+</div>
+
+<!-- Hidden sandboxes for DOM operations -->
+<div id="sandbox-ts"></div>
+<div id="sandbox-rs"></div>
+
+<!-- Load both implementations under different globals -->
+<script>
+  // Load TS version as UEntropy_TS
+  var UEntropy_TS = null;
+  var UEntropy_RS = null;
+</script>
+<script src="../entropy/dist/entropy.min.js"></script>
+<script>
+  UEntropy_TS = { ...UEntropy };
+  // Reset UEntropy so RS can use same global
+  UEntropy = undefined;
+</script>
+<script src="dist/entropy.min.js"></script>
+<script>
+  UEntropy_RS = { ...UEntropy };
+</script>
+
+<script>
+'use strict';
+
+// ─── Benchmark infrastructure ───────────────────────────────────────────────
+
+const RUNS = 5; // median of N runs
+const results = {};
+
+function median(arr) {
+  const s = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+function time(fn) {
+  const t0 = performance.now();
+  fn();
+  return performance.now() - t0;
+}
+
+function setStatus(msg) {
+  document.getElementById('status').textContent = msg;
+}
+
+// ─── Benchmark definitions ──────────────────────────────────────────────────
+
+const benchmarks = {
+
+  // 1. Instance creation + init
+  'init': {
+    name: 'Instance creation + init()',
+    desc: 'Create 1000 instances, call init() on each',
+    run(lib, sandbox) {
+      for (let i = 0; i < 1000; i++) {
+        const en = lib.createInstance();
+        const data = en.init();
+        en.destroy();
+      }
+    }
+  },
+
+  // 2. Primitive property set/get
+  'primitives': {
+    name: 'Primitive set/get (50k ops)',
+    desc: 'Set and read 50,000 primitive properties on a reactive proxy',
+    run(lib, sandbox) {
+      const en = lib.createInstance();
+      const data = en.init();
+      for (let i = 0; i < 50000; i++) {
+        data['k' + (i % 100)] = i;
+      }
+      let sum = 0;
+      for (let i = 0; i < 50000; i++) {
+        sum += data['k' + (i % 100)];
+      }
+      en.destroy();
+    }
+  },
+
+  // 3. Nested object assignment
+  'objects': {
+    name: 'Nested object assign (10k)',
+    desc: 'Assign 10,000 nested objects { a: { b: { c: N } } }',
+    run(lib, sandbox) {
+      const en = lib.createInstance();
+      const data = en.init();
+      for (let i = 0; i < 10000; i++) {
+        data['obj' + (i % 50)] = { a: { b: { c: i } } };
+      }
+      en.destroy();
+    }
+  },
+
+  // 4. Array operations
+  'arrays': {
+    name: 'Array mutations (push/splice/assign)',
+    desc: '1000 pushes, 500 splices, 100 full reassignments',
+    run(lib, sandbox) {
+      const en = lib.createInstance();
+      const data = en.init();
+      data.list = [];
+      for (let i = 0; i < 1000; i++) data.list.push(i);
+      for (let i = 0; i < 500; i++) data.list.splice(0, 1);
+      for (let i = 0; i < 100; i++) {
+        data.list = Array.from({ length: 50 }, (_, j) => i * 50 + j);
+      }
+      en.destroy();
+    }
+  },
+
+  // 5. Computed value evaluation
+  'computed': {
+    name: 'Computed re-evaluation (20k)',
+    desc: '20,000 dependency changes triggering computed re-evaluation',
+    run(lib, sandbox) {
+      const en = lib.createInstance();
+      const data = en.init();
+      data.a = 0;
+      data.b = 0;
+      data.sum = en.computed(() => data.a + data.b);
+      for (let i = 0; i < 10000; i++) {
+        data.a = i;
+        data.b = i * 2;
+      }
+      en.destroy();
+    }
+  },
+
+  // 6. Watcher dispatch
+  'watchers': {
+    name: 'Watcher dispatch (20k fires)',
+    desc: '10 watchers on a key, 2,000 changes = 20,000 watcher calls',
+    run(lib, sandbox) {
+      const en = lib.createInstance();
+      const data = en.init();
+      data.val = 0;
+      let acc = 0;
+      for (let w = 0; w < 10; w++) {
+        en.watch('val', (v) => { acc += v; });
+      }
+      for (let i = 0; i < 2000; i++) {
+        data.val = i;
+      }
+      en.destroy();
+    }
+  },
+
+  // 7. Custom directive dispatch
+  'directives': {
+    name: 'Directive fire (5k updates)',
+    desc: '50 elements × 100 value changes = 5,000 directive calls',
+    run(lib, sandbox) {
+      sandbox.innerHTML = '';
+      for (let i = 0; i < 50; i++) {
+        sandbox.innerHTML += `<span en-mark="val"></span>`;
+      }
+      const en = lib.createInstance();
+      const data = en.init();
+      for (let i = 0; i < 100; i++) {
+        data.val = 'update-' + i;
+      }
+      en.destroy();
+      sandbox.innerHTML = '';
+    }
+  },
+
+  // 8. Batch performance
+  'batch': {
+    name: 'Batch 1000 changes vs unbatched',
+    desc: 'Batch 1000 property changes into single flush',
+    run(lib, sandbox) {
+      sandbox.innerHTML = '';
+      for (let i = 0; i < 20; i++) {
+        sandbox.innerHTML += `<span en-mark="p${i}"></span>`;
+      }
+      const en = lib.createInstance();
+      const data = en.init();
+      // Initialize
+      for (let i = 0; i < 20; i++) data['p' + i] = 0;
+
+      for (let round = 0; round < 50; round++) {
+        en.batch(() => {
+          for (let i = 0; i < 20; i++) {
+            data['p' + i] = round * 20 + i;
+          }
+        });
+      }
+      en.destroy();
+      sandbox.innerHTML = '';
+    }
+  },
+
+  // 9. DOM array rendering
+  'dom-array': {
+    name: 'DOM array render (500 items × 10)',
+    desc: 'Render 500-item array 10 times, full destroy+rebuild each time',
+    run(lib, sandbox) {
+      sandbox.innerHTML = '<ul><li en-mark="items.#"></li></ul>';
+      const en = lib.createInstance();
+      const data = en.init();
+      for (let round = 0; round < 10; round++) {
+        data.items = Array.from({ length: 500 }, (_, i) => `item-${round}-${i}`);
+      }
+      en.destroy();
+      sandbox.innerHTML = '';
+    }
+  },
+
+  // 10. Mixed realistic workload
+  'mixed': {
+    name: 'Mixed realistic workload',
+    desc: 'Simulates a real app: objects, arrays, computed, watchers, DOM',
+    run(lib, sandbox) {
+      sandbox.innerHTML = `
+        <div en-mark="title"></div>
+        <span en-mark="count"></span>
+        <template en-if="show"><p en-mark="msg"></p></template>
+        <ul><li en-mark="todos.#"></li></ul>
+      `;
+      const en = lib.createInstance();
+      const data = en.init();
+
+      data.title = 'Benchmark App';
+      data.count = en.computed(() => data.todos ? data.todos.length : 0);
+      data.show = false;
+      data.msg = '';
+      data.todos = [];
+
+      let watchCount = 0;
+      en.watch('todos', () => { watchCount++; });
+
+      // Simulate user interactions
+      for (let i = 0; i < 200; i++) {
+        en.batch(() => {
+          data.todos = [...(data.todos || []), `Todo ${i}`];
+          data.title = `App (${i + 1} todos)`;
+          data.show = i % 3 === 0;
+          data.msg = data.show ? `Showing at ${i}` : '';
+        });
+      }
+
+      // Bulk updates
+      for (let i = 0; i < 50; i++) {
+        data.todos = data.todos.slice(1);
+      }
+
+      en.destroy();
+      sandbox.innerHTML = '';
+    }
+  },
+};
+
+// ─── Runner ─────────────────────────────────────────────────────────────────
+
+const tbody = document.getElementById('results');
+const benchIds = Object.keys(benchmarks);
+
+// Pre-populate table
+benchIds.forEach((id, i) => {
+  const b = benchmarks[id];
+  const tr = document.createElement('tr');
+  tr.id = 'row-' + id;
+  tr.innerHTML = `
+    <td>${i + 1}</td>
+    <td><strong>${b.name}</strong><br><small style="color:#64748b">${b.desc}</small></td>
+    <td class="ts-val">—</td>
+    <td class="rs-val">—</td>
+    <td class="delta">—</td>
+    <td class="bar-cell"><div class="bar-wrap"><div class="bar ts" style="width:0"></div><div class="bar rs" style="width:0"></div></div></td>
+  `;
+  tbody.appendChild(tr);
+});
+
+async function runOne(id) {
+  const b = benchmarks[id];
+  if (!b) return;
+  setStatus(`Running: ${b.name}…`);
+  await new Promise(r => setTimeout(r, 50)); // let UI update
+
+  const sandboxTs = document.getElementById('sandbox-ts');
+  const sandboxRs = document.getElementById('sandbox-rs');
+
+  const tsTimes = [];
+  const rsTimes = [];
+
+  for (let run = 0; run < RUNS; run++) {
+    // Alternate order to reduce systematic bias
+    if (run % 2 === 0) {
+      tsTimes.push(time(() => b.run(UEntropy_TS, sandboxTs)));
+      rsTimes.push(time(() => b.run(UEntropy_RS, sandboxRs)));
+    } else {
+      rsTimes.push(time(() => b.run(UEntropy_RS, sandboxRs)));
+      tsTimes.push(time(() => b.run(UEntropy_TS, sandboxTs)));
+    }
+  }
+
+  const tsMedian = median(tsTimes);
+  const rsMedian = median(rsTimes);
+  results[id] = { ts: tsMedian, rs: rsMedian };
+
+  updateRow(id, tsMedian, rsMedian);
+  setStatus(`Done: ${b.name}`);
+}
+
+function updateRow(id, tsMs, rsMs) {
+  const row = document.getElementById('row-' + id);
+  if (!row) return;
+
+  const tsCell = row.querySelector('.ts-val');
+  const rsCell = row.querySelector('.rs-val');
+  const deltaCell = row.querySelector('.delta');
+  const barWrap = row.querySelector('.bar-wrap');
+
+  tsCell.textContent = tsMs.toFixed(2);
+  rsCell.textContent = rsMs.toFixed(2);
+
+  const maxMs = Math.max(tsMs, rsMs, 0.01);
+  const ratio = tsMs / rsMs;
+
+  if (Math.abs(ratio - 1) < 0.05) {
+    deltaCell.innerHTML = '<span class="tie">~tie</span>';
+  } else if (rsMs < tsMs) {
+    const pct = ((1 - rsMs / tsMs) * 100).toFixed(1);
+    deltaCell.innerHTML = `<span class="faster">RS ${pct}% faster</span>`;
+    row.classList.add('winner');
+  } else {
+    const pct = ((1 - tsMs / rsMs) * 100).toFixed(1);
+    deltaCell.innerHTML = `<span class="slower">TS ${pct}% faster</span>`;
+    row.classList.remove('winner');
+  }
+
+  const tsBar = barWrap.querySelector('.bar.ts');
+  const rsBar = barWrap.querySelector('.bar.rs');
+  tsBar.style.width = (tsMs / maxMs * 90) + 'px';
+  rsBar.style.width = (rsMs / maxMs * 90) + 'px';
+}
+
+async function runAll() {
+  const btns = document.querySelectorAll('button');
+  btns.forEach(b => b.disabled = true);
+
+  for (const id of benchIds) {
+    await runOne(id);
+    await new Promise(r => setTimeout(r, 100)); // cool-down between benchmarks
+  }
+
+  btns.forEach(b => b.disabled = false);
+  setStatus('All benchmarks complete.');
+  updateSummary();
+}
+
+function updateSummary() {
+  const ids = Object.keys(results);
+  if (ids.length === 0) return;
+
+  let rsWins = 0, tsWins = 0, ties = 0;
+  let totalTs = 0, totalRs = 0;
+
+  for (const id of ids) {
+    const { ts, rs } = results[id];
+    totalTs += ts;
+    totalRs += rs;
+    const ratio = ts / rs;
+    if (Math.abs(ratio - 1) < 0.05) ties++;
+    else if (rs < ts) rsWins++;
+    else tsWins++;
+  }
+
+  const overallRatio = (totalTs / totalRs).toFixed(2);
+  const overallPct = ((1 - Math.min(totalTs, totalRs) / Math.max(totalTs, totalRs)) * 100).toFixed(1);
+  const faster = totalRs < totalTs ? 'ReScript' : 'TypeScript';
+
+  document.getElementById('summary-text').innerHTML = `
+    <strong>${ids.length} benchmarks completed</strong><br>
+    ReScript wins: <strong style="color:#4ade80">${rsWins}</strong> &nbsp;|&nbsp;
+    TypeScript wins: <strong style="color:#f87171">${tsWins}</strong> &nbsp;|&nbsp;
+    Ties: <strong>${ties}</strong><br>
+    Total time — TS: <strong>${totalTs.toFixed(1)}ms</strong> &nbsp;|&nbsp;
+    RS: <strong>${totalRs.toFixed(1)}ms</strong><br>
+    Overall: <strong>${faster}</strong> is ~<strong>${overallPct}%</strong> faster across all benchmarks (ratio: ${overallRatio}×)<br>
+    <br>
+    <small style="color:#64748b">
+      Bundle size — TS: <strong>14K</strong> &nbsp;|&nbsp; RS: <strong>18K</strong> (minified, gzipped both ~5-6K)<br>
+      Each benchmark runs ${RUNS} times, median taken. Order alternated to reduce bias.
+    </small>
+  `;
+}
+</script>
+</body>
+</html>
