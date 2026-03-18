@@ -21,8 +21,9 @@ let scheduleUpdate = (ctx: context, fn: unit => unit): unit =>
 // Forward ref for reactive (only used by proxyComputed)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-let reactiveRef: ref<(context, unknown, string, option<unknown>, option<string>) => unknown> =
-  ref((_, v, _, _, _) => v)
+let reactiveRef: ref<
+  (context, unknown, string, option<unknown>, option<string>) => unknown,
+> = ref((_, v, _, _, _) => v)
 
 let proxyComputed = (
   ctx: context,
@@ -47,10 +48,16 @@ let proxyComputed = (
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // Forward ref needed because syncDirectives calls update which isn't defined yet
-let updateFnRef: ref<(context, unknown, string, bool, unknown, string, option<syncConfig>) => unit> =
-  ref((_, _, _, _, _, _, _) => ())
+let updateFnRef: ref<
+  (context, unknown, string, bool, unknown, string, option<syncConfig>) => unit,
+> = ref((_, _, _, _, _, _, _) => ())
 
-let syncDirectives = (ctx: context, el: EnDom.element, skipConditionals: bool, skipMark: bool): unit =>
+let syncDirectives = (
+  ctx: context,
+  el: EnDom.element,
+  skipConditionals: bool,
+  skipMark: bool,
+): unit =>
   ctx.directives->Js.mapForEach((dirEntry, name) => {
     if skipMark && name === "mark" {
       ()
@@ -63,7 +70,11 @@ let syncDirectives = (ctx: context, el: EnDom.element, skipConditionals: bool, s
       | Some(rawKey) => {
           let key = if dirEntry.isParametric {
             let i = rawKey->String.indexOf(":")
-            if i >= 0 { rawKey->String.slice(~start=0, ~end=i) } else { rawKey }
+            if i >= 0 {
+              rawKey->String.slice(~start=0, ~end=i)
+            } else {
+              rawKey
+            }
           } else {
             rawKey
           }
@@ -114,17 +125,20 @@ let ifOrIfNot = (
   key: string,
   condType: conditionalType,
 ): unit => {
+  // JS truthiness: for If, any truthy value. For IfNot, any falsy value.
   let isShow = switch condType {
-  | If => Js.cast(value) === true || (Js.isObject(value) && !Js.isNull(value))
-  | IfNot => Js.cast(value) === false || Js.isNull(value) || Js.isUndefined(value)
-  }
-  // Truthiness: for If, any truthy value. For IfNot, any falsy value.
-  let isShow = switch condType {
-  | If => !Js.isNull(value) && !Js.isUndefined(value) && Js.cast(value) !== false && Js.cast(value) !== 0
-  | IfNot => Js.isNull(value) || Js.isUndefined(value) || Js.cast(value) === false || Js.cast(value) === 0
+  | If =>
+    !Js.isNull(value) && !Js.isUndefined(value) && Js.cast(value) !== false && Js.cast(value) !== 0
+  | IfNot =>
+    Js.isNull(value) || Js.isUndefined(value) || Js.cast(value) === false || Js.cast(value) === 0
   }
   let isTemplate = EnDom.isTemplate(el)
-  let attrType = ctx.prefix + (switch condType { | If => "if" | IfNot => "ifnot" })
+  let attrType =
+    ctx.prefix +
+    switch condType {
+    | If => "if"
+    | IfNot => "ifnot"
+    }
   let attrMark = ctx.prefix + "mark"
 
   // Show: template → clone children, register, sync, insert
@@ -182,7 +196,7 @@ let ifOrIfNot = (
         Registry.scanAndRegister(ctx.registry, temp, ctx)
         // Remove remaining siblings
         siblings
-        ->Array.sliceToEnd(~start=1)
+        ->Array.slice(~start=1)
         ->Array.forEach(s => s->EnDom.remove)
       }
     }
@@ -193,7 +207,12 @@ let ifOrIfNot = (
 // Array DOM management — still %raw for template content, but registers clones
 // ═══════════════════════════════════════════════════════════════════════════════
 
-let rewriteCloneKeys = (ctx: context, clone: EnDom.element, key: string, placeholderKey: string): unit => {
+let rewriteCloneKeys = (
+  ctx: context,
+  clone: EnDom.element,
+  key: string,
+  placeholderKey: string,
+): unit => {
   // Collect attr names once
   let attrNames = []
   ctx.directives->Js.mapForEach((_, name) => attrNames->Array.push(ctx.prefix + name))
@@ -202,7 +221,10 @@ let rewriteCloneKeys = (ctx: context, clone: EnDom.element, key: string, placeho
   attrNames->Array.forEach(attrName =>
     switch clone->EnDom.getAttribute(attrName) {
     | Some(cur) if cur->String.startsWith(placeholderKey) =>
-      clone->EnDom.setAttribute(attrName, key + cur->String.sliceToEnd(~start=placeholderKey->String.length))
+      clone->EnDom.setAttribute(
+        attrName,
+        key + cur->String.slice(~start=placeholderKey->String.length),
+      )
     | _ => ()
     }
   )
@@ -211,7 +233,10 @@ let rewriteCloneKeys = (ctx: context, clone: EnDom.element, key: string, placeho
     attrNames->Array.forEach(attrName =>
       switch child->EnDom.getAttribute(attrName) {
       | Some(cur) if cur->String.startsWith(placeholderKey) =>
-        child->EnDom.setAttribute(attrName, key + cur->String.sliceToEnd(~start=placeholderKey->String.length))
+        child->EnDom.setAttribute(
+          attrName,
+          key + cur->String.slice(~start=placeholderKey->String.length),
+        )
       | _ => ()
       }
     )
@@ -220,7 +245,12 @@ let rewriteCloneKeys = (ctx: context, clone: EnDom.element, key: string, placeho
 
 // ── Remove old array item elements (walk backward from placeholder) ─────────
 
-let removeOldItems = (ctx: context, plc: EnDom.element, placeholderKey: string, attrMark: string): unit => {
+let removeOldItems = (
+  ctx: context,
+  plc: EnDom.element,
+  placeholderKey: string,
+  attrMark: string,
+): unit => {
   let prev = ref(plc->EnDom.previousElementSibling->Nullable.toOption)
   let continue_ = ref(true)
   while prev.contents !== None && continue_.contents {
@@ -264,7 +294,12 @@ let resolveTemplate: (EnDom.element, string, string) => templateResolution = %ra
 // DocumentFragment requires the clone to happen in the same JS scope as
 // the template resolution).
 
-let initializeArrayElements: (context, EnDom.element, string, unknown) => array<EnDom.element> = %raw(`
+let initializeArrayElements: (
+  context,
+  EnDom.element,
+  string,
+  unknown,
+) => array<EnDom.element> = %raw(`
   function(ctx, plc, placeholderKey, array) {
     var attrMark = ctx.prefix + 'mark';
     var prev = plc.previousElementSibling;
@@ -312,7 +347,9 @@ let initializeArrayElements: (context, EnDom.element, string, unknown) => array<
 
 // ── Find placeholder template after an element ──────────────────────────────
 
-let findPlaceholderAfter = (el: EnDom.element, placeholderKey: string, attrMark: string): option<EnDom.element> => {
+let findPlaceholderAfter = (el: EnDom.element, placeholderKey: string, attrMark: string): option<
+  EnDom.element,
+> => {
   let ph = ref(el->EnDom.nextElementSibling->Nullable.toOption)
   let result = ref(None)
   while ph.contents !== None && result.contents === None {
@@ -368,7 +405,11 @@ let updateArrayItemElement = (
         switch cloneFromPlaceholder(ph) {
         | None => ()
         | Some(cl) => {
-            let k = if prefix === "" { idx } else { prefix + "." + idx }
+            let k = if prefix === "" {
+              idx
+            } else {
+              prefix + "." + idx
+            }
             rewriteCloneKeys(ctx, cl, k, placeholderKey)
             Registry.unregisterElement(ctx.registry, el)
             el->EnDom.replaceWith(cl)
@@ -388,7 +429,11 @@ let updateArrayItemElement = (
           | None => ()
           | Some(firstChild) => {
               let clone = firstChild->EnDom.cloneNode(true)
-              let k = if prefix === "" { idx } else { prefix + "." + idx }
+              let k = if prefix === "" {
+                idx
+              } else {
+                prefix + "." + idx
+              }
               rewriteCloneKeys(ctx, clone, k, placeholderKey)
               tpl->EnDom.before(clone)
               syncClone(ctx, clone)
@@ -407,7 +452,11 @@ type sortEntry = {el: EnDom.element, idx: int}
 let sortArrayItemElements = (ctx: context, array: unknown): unit => {
   let attrMark = ctx.prefix + "mark"
   let prefix = Js.getPrefix(array)
-  let templateKey = if prefix === "" { "#" } else { prefix + ".#" }
+  let templateKey = if prefix === "" {
+    "#"
+  } else {
+    prefix + ".#"
+  }
   let templatePrefix = templateKey->String.slice(~start=0, ~end=templateKey->String.length - 1)
 
   EnDom.querySelectorAll(EnDom.document, `[${attrMark}="${templateKey}"]`)->Array.forEach(tpl => {
@@ -424,7 +473,7 @@ let sortArrayItemElements = (ctx: context, array: unknown): unit => {
       | None => () // skip
       | Some(k) if k === templateKey => continue_ := false
       | Some(k) if k->String.startsWith(templatePrefix) =>
-        let idxStr = k->String.sliceToEnd(~start=templatePrefix->String.length)
+        let idxStr = k->String.slice(~start=templatePrefix->String.length)
         let idx = Js.parseInt(idxStr)
         if !Float.isNaN(idx) {
           let idxInt = Float.toInt(idx)
@@ -491,12 +540,7 @@ let rec callDirectivesForLeaf = (
     })
   }
 
-and callDirectivesForObject = (
-  ctx: context,
-  value: unknown,
-  key: string,
-  isDelete: bool,
-): unit =>
+and callDirectivesForObject = (ctx: context, value: unknown, key: string, isDelete: bool): unit =>
   Js.objectKeys(value)->Array.forEach(k =>
     callDirectives(ctx, Js.getProp(value, k), Utils.getKey(k, key), isDelete, value, k, false, None)
   )
@@ -506,8 +550,8 @@ and callDirectivesForArray = (
   value: unknown,
   key: string,
   isDelete: bool,
-  parent: unknown,
-  prop: string,
+  _parent: unknown,
+  _prop: string,
   syncCfg: option<syncConfig>,
 ): unit => {
   let placeholderKey = key + ".#"
@@ -544,14 +588,31 @@ and callDirectivesForArray = (
   })
 
   let len: int = Js.cast(Js.getProp(value, "length"))
-  elsArrays->Array.forEach(els => {
+  elsArrays->Array.forEach(_els => {
     for i in 0 to len - 1 {
       let idx = Int.toString(i)
-      callDirectives(ctx, Js.getProp(value, idx), Utils.getKey(idx, key), isDelete, value, idx, true, None)
+      callDirectives(
+        ctx,
+        Js.getProp(value, idx),
+        Utils.getKey(idx, key),
+        isDelete,
+        value,
+        idx,
+        true,
+        None,
+      )
     }
   })
 
-  callDirectivesForLeaf(ctx, Js.cast(len), Utils.getKey("length", key), isDelete, value, "length", None)
+  callDirectivesForLeaf(
+    ctx,
+    Js.cast(len),
+    Utils.getKey("length", key),
+    isDelete,
+    value,
+    "length",
+    None,
+  )
 }
 
 and callDirectives = (
@@ -567,7 +628,10 @@ and callDirectives = (
   let isParentArr = Js.isArray(parent)
 
   if isParentArr && Js.isDigitString(prop) && !skipUpdateArrayElements {
-    let skip = switch syncCfg { | Some(cfg) => cfg.skipMark | None => false }
+    let skip = switch syncCfg {
+    | Some(cfg) => cfg.skipMark
+    | None => false
+    }
     if !skip {
       updateArrayItemElement(ctx, key, prop, value, parent)
     }
@@ -577,7 +641,10 @@ and callDirectives = (
 
   if Js.hasPrefix(value) {
     if Js.isArray(value) {
-      let skip = switch syncCfg { | Some(cfg) => cfg.skipMark | None => false }
+      let skip = switch syncCfg {
+      | Some(cfg) => cfg.skipMark
+      | None => false
+      }
       if !skip {
         callDirectivesForArray(ctx, value, key, isDelete, parent, prop, syncCfg)
       }
@@ -601,7 +668,11 @@ and update = (
 ): unit => {
   if !ctx.destroyed {
     let isCompFn = Js.isFunction(value) && !(ctx.computedResultFns->WeakSet.has(value))
-    let finalValue = if isCompFn { runComputed(ctx, value, key, parent, prop) } else { value }
+    let finalValue = if isCompFn {
+      runComputed(ctx, value, key, parent, prop)
+    } else {
+      value
+    }
 
     if isCompFn && Js.isUndefined(finalValue) {
       ()
@@ -635,7 +706,15 @@ and runComputed = (
       result,
       v =>
         if Computed.isCurrentVersion(ctx, key, version) {
-          update(ctx, proxyComputed(ctx, v, Some(key), Some(parent), Some(prop)), key, false, parent, prop, None)
+          update(
+            ctx,
+            proxyComputed(ctx, v, Some(key), Some(parent), Some(prop)),
+            key,
+            false,
+            parent,
+            prop,
+            None,
+          )
         },
       err => Console.error3("[entropy] Async computed error at", key, err),
     )
@@ -717,10 +796,16 @@ let () = reactiveRef := Js.cast(reactive)
 let bootstrapDirectives = (ctx: context): unit => {
   Directives.registerBuiltins(ctx)
   ctx.directives
-  ->Map.set("if", {cb: (p: directiveParams) => ifOrIfNot(ctx, p.el, p.value, p.key, If), isParametric: false})
+  ->Map.set(
+    "if",
+    {cb: (p: directiveParams) => ifOrIfNot(ctx, p.el, p.value, p.key, If), isParametric: false},
+  )
   ->ignore
   ctx.directives
-  ->Map.set("ifnot", {cb: (p: directiveParams) => ifOrIfNot(ctx, p.el, p.value, p.key, IfNot), isParametric: false})
+  ->Map.set(
+    "ifnot",
+    {cb: (p: directiveParams) => ifOrIfNot(ctx, p.el, p.value, p.key, IfNot), isParametric: false},
+  )
   ->ignore
 }
 
@@ -730,8 +815,13 @@ let bootstrapDirectives = (ctx: context): unit => {
 
 let batch = (ctx: context, fn: unit => unit): unit => {
   ctx.batchQueue = Some([])
-  try { fn() } catch { | _ => () }
-  let queue = switch ctx.batchQueue { | Some(q) => q | None => [] }
+  try {fn()} catch {
+  | _ => ()
+  }
+  let queue = switch ctx.batchQueue {
+  | Some(q) => q
+  | None => []
+  }
   ctx.batchQueue = None
   queue->Array.forEach(task => task())
 }

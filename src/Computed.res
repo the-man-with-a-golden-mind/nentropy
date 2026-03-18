@@ -49,7 +49,9 @@ let setDependents = (
   clearDepsForKey(ctx, key)
   ctx.deps.isEvaluating = true
   ctx.deps.currentSet->Set.clear
-  try { Js.callFn(value)->ignore } catch { | _ => () }
+  try {Js.callFn(value)->ignore} catch {
+  | _ => ()
+  }
   ctx.deps.isEvaluating = false
   registerTrackedDeps(ctx, key, value, parent, prop)
   ctx.deps.currentSet->Set.clear
@@ -60,7 +62,9 @@ let getDependentsOf = (ctx: context, changedKey: string): array<computedDep> => 
   let seen = Set.make()
   let changedDot = changedKey + "."
   ctx.deps.depMap->Js.mapForEach((list, k) => {
-    if k === changedKey || k->String.startsWith(changedDot) || changedKey->String.startsWith(k + ".") {
+    if (
+      k === changedKey || k->String.startsWith(changedDot) || changedKey->String.startsWith(k + ".")
+    ) {
       list->Array.forEach(dep => {
         if !(seen->Set.has(dep.computed)) {
           seen->Set.add(dep.computed)->ignore

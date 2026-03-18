@@ -15,7 +15,8 @@ external asElement: 'a => element = "%identity"
 
 @val external document: document = "document"
 @send external createElement: (document, string) => element = "createElement"
-@send @return(nullable) external querySelector: (document, string) => option<element> = "querySelector"
+@send @return(nullable)
+external querySelector: (document, string) => option<element> = "querySelector"
 @get external readyState: document => string = "readyState"
 @send external addDocListener: (document, string, unit => unit) => unit = "addEventListener"
 @send external removeDocListener: (document, string, unit => unit) => unit = "removeEventListener"
@@ -61,7 +62,8 @@ let hasChildren = (el: element): bool => el->getChildren->Array.length > 0
 
 let isTemplate: element => bool = %raw(`function(el) { return el instanceof HTMLTemplateElement; }`)
 let getTemplateFirstChild = (tpl: element): option<element> => tpl->_content->_firstElementChild
-let appendToTemplateContent = (tpl: element, node: element): unit => tpl->_content->_appendChild(node)
+let appendToTemplateContent = (tpl: element, node: element): unit =>
+  tpl->_content->_appendChild(node)
 let getTemplateChildren = (tpl: element): array<element> => tpl->_content->_childrenRaw->_arrayFrom
 
 // ── instanceof checks — need %raw (no ReScript equivalent for instanceof) ──
@@ -88,10 +90,11 @@ let isElementInstance: element => bool = %raw(`function(el) { return el instance
 @send external disconnect: observer => unit = "disconnect"
 
 let makeObserver = (cb: unit => unit): option<observer> =>
-  try { Some(_newObserver(cb)) } catch { | _ => None }
+  try {Some(_newObserver(cb))} catch {
+  | _ => None
+  }
 
-let observe = (obs: observer): unit =>
-  obs->_observe(document, {"childList": true, "subtree": true})
+let observe = (obs: observer): unit => obs->_observe(document, {"childList": true, "subtree": true})
 
 // ── Custom Elements (genuinely needs %raw — class extends) ──────────────────
 

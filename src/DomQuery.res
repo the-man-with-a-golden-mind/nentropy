@@ -18,8 +18,11 @@ let getValue = (ctx: context, key: string): getValueResult =>
         let prop = parts->Array.getUnsafe(idx)
         let value = Js.reflectGet(parent, prop)
         if idx < len - 1 {
-          if Js.isObject(value) { walk(value, idx + 1) }
-          else { {value: Js.cast(undefined), parent: Some(parent), prop} }
+          if Js.isObject(value) {
+            walk(value, idx + 1)
+          } else {
+            {value: Js.cast(undefined), parent: Some(parent), prop}
+          }
         } else {
           {value, parent: Some(parent), prop}
         }

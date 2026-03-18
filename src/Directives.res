@@ -7,8 +7,9 @@ let registerDirective = (ctx: context, name: string, cb: directive, ~isParametri
     ctx.directives->Map.set(name, {cb, isParametric})->ignore
     // Scan existing DOM for elements that use this new directive
     let attrName = ctx.prefix + name
-    EnDom.querySelectorAll(EnDom.document, `[${attrName}]`)
-    ->Array.forEach(el => Registry.scanAndRegister(ctx.registry, el, ctx))
+    EnDom.querySelectorAll(EnDom.document, `[${attrName}]`)->Array.forEach(el =>
+      Registry.scanAndRegister(ctx.registry, el, ctx)
+    )
   }
 
 // ── mark ────────────────────────────────────────────────────────────────────
@@ -76,8 +77,7 @@ let makeModelDirective = (ctx: context): directive =>
         // data → DOM
         switch kind {
         | Checkbox => el->EnDom.setInputChecked(Js.cast(params.value) === true)
-        | Radio =>
-          el->EnDom.setInputChecked(el->EnDom.inputValue === Js.cast(params.value))
+        | Radio => el->EnDom.setInputChecked(el->EnDom.inputValue === Js.cast(params.value))
         | _ =>
           let strVal: string = if Js.isNull(params.value) || Js.isUndefined(params.value) {
             ""

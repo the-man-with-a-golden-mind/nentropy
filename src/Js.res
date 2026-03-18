@@ -49,8 +49,7 @@ let setPrefix: (unknown, string) => unit = %raw(`
 @scope("Reflect") @val external reflectGet3: (unknown, string, unknown) => unknown = "get"
 @scope("Reflect") @val external reflectSet3: (unknown, string, unknown) => bool = "set"
 
-let reflectGet = (target: unknown, prop: string): unknown =>
-  reflectGet3(target, prop, target)
+let reflectGet = (target: unknown, prop: string): unknown => reflectGet3(target, prop, target)
 
 let reflectSet = (target: unknown, prop: string, value: unknown): unit =>
   reflectSet3(target, prop, value)->ignore
@@ -60,8 +59,7 @@ let reflectSet = (target: unknown, prop: string, value: unknown): unit =>
 @send external _then: (unknown, unknown => unit) => unknown = "then"
 @send external _catch: (unknown, unknown => unit) => unknown = "catch"
 
-let promiseThen = (p: unknown, ok: unknown => unit): unit =>
-  p->_then(ok)->ignore
+let promiseThen = (p: unknown, ok: unknown => unit): unit => p->_then(ok)->ignore
 
 let promiseThenCatch = (p: unknown, ok: unknown => unit, err: unknown => unit): unit =>
   p->_then(ok)->_catch(err)->ignore

@@ -32,8 +32,9 @@ let init = (inst: t): unknown => {
   })
   if selectors->Array.length > 0 {
     let query = selectors->Array.join(",")
-    EnDom.querySelectorAll(EnDom.document, query)
-    ->Array.forEach(el => Registry.scanAndRegister(inst.ctx.registry, el, inst.ctx))
+    EnDom.querySelectorAll(EnDom.document, query)->Array.forEach(el =>
+      Registry.scanAndRegister(inst.ctx.registry, el, inst.ctx)
+    )
   }
 
   switch inst.readyStateHandler {
@@ -55,8 +56,7 @@ let init = (inst: t): unknown => {
 
 let computed = Computed.markComputed
 
-let watch = (inst: t, key: string, watcher: watcher): unit =>
-  Watchers.watch(inst.ctx, key, watcher)
+let watch = (inst: t, key: string, watcher: watcher): unit => Watchers.watch(inst.ctx, key, watcher)
 
 let unwatch = (inst: t, ~key: option<string>=?, ~watcher: option<watcher>=?): unit =>
   Watchers.unwatch(inst.ctx, key, watcher)
@@ -65,7 +65,11 @@ let directive = (inst: t, name: string, cb: directive, ~isParametric=false): uni
   Directives.registerDirective(inst.ctx, name, cb, ~isParametric)
 
 let prefix = (inst: t, ~value: string="en"): unit =>
-  inst.ctx.prefix = if value->String.endsWith("-") { value } else { value + "-" }
+  inst.ctx.prefix = if value->String.endsWith("-") {
+    value
+  } else {
+    value + "-"
+  }
 
 let batch = (inst: t, fn: unit => unit): unit => Core.batch(inst.ctx, fn)
 
@@ -73,8 +77,7 @@ let load = async (_inst: t, files: array<string>): unit => {
   let _ = await Promise.all(files->Array.map(DomComponent.loadTemplateFile))
 }
 
-let register = (_inst: t, root: option<EnDom.element>): unit =>
-  DomComponent.registerTemplates(root)
+let register = (_inst: t, root: option<EnDom.element>): unit => DomComponent.registerTemplates(root)
 
 let destroy = (inst: t): unit => {
   inst.ctx.destroyed = true
