@@ -24,6 +24,18 @@ let init = (inst: t): unknown => {
   DomComponent.registerTemplates(None)
   DomQuery.setupObserver(inst.ctx)
 
+  // Scan existing DOM elements into the registry.
+  // Build a selector that matches ANY registered directive attribute.
+  let selectors = []
+  inst.ctx.directives->Js.mapForEach((_, name) => {
+    selectors->Array.push(`[${inst.ctx.prefix}${name}]`)
+  })
+  if selectors->Array.length > 0 {
+    let query = selectors->Array.join(",")
+    EnDom.querySelectorAll(EnDom.document, query)
+    ->Array.forEach(el => Registry.scanAndRegister(inst.ctx.registry, el, inst.ctx))
+  }
+
   switch inst.readyStateHandler {
   | None =>
     let handler = () =>
@@ -55,11 +67,6 @@ let directive = (inst: t, name: string, cb: directive, ~isParametric=false): uni
 let prefix = (inst: t, ~value: string="en"): unit =>
   inst.ctx.prefix = if value->String.endsWith("-") { value } else { value + "-" }
 
-let cache = (inst: t, enabled: bool): unit => {
-  inst.ctx.useCache = enabled
-  if !enabled { inst.ctx.elementCache->Map.clear }
-}
-
 let batch = (inst: t, fn: unit => unit): unit => Core.batch(inst.ctx, fn)
 
 let load = async (_inst: t, files: array<string>): unit => {
@@ -80,7 +87,7 @@ let destroy = (inst: t): unit => {
   inst.ctx.watchers->Map.clear
   inst.ctx.deps.depMap->Map.clear
   inst.ctx.deps.versions->Map.clear
-  inst.ctx.elementCache->Map.clear
+  inst.ctx.registry->Map.clear
   switch inst.ctx.observer {
   | Some(obs) =>
     obs->EnDom.disconnect

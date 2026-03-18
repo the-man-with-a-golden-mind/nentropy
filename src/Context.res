@@ -16,7 +16,6 @@ let make = (): context => {
   computedResultFns: WeakSet.make(),
   batchQueue: None,
   destroyed: false,
-  elementCache: Map.make(),
+  registry: Registry.make(),
   observer: None,
-  useCache: false,
 }

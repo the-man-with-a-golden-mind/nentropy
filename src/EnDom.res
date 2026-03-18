@@ -1,14 +1,14 @@
-// ─── Dom.res ──────────────────────────────────────────────────────────────────
-// Typed DOM bindings using @send/@get/@set — no %raw wrappers.
-// Each binding compiles to a DIRECT property access or method call.
+// ─── EnDom.res ────────────────────────────────────────────────────────────────
+// Typed DOM bindings. Zero %raw except defineCustomElement (class extends).
+// Every binding compiles to a direct property access or method call.
 
 // ── Abstract types ──────────────────────────────────────────────────────────
 
 type element
 type document
 type observer
+type nodeList
 
-// Cast between element subtypes (template, input, etc.) — zero cost
 external asElement: 'a => element = "%identity"
 
 // ── Document ────────────────────────────────────────────────────────────────
@@ -16,17 +16,19 @@ external asElement: 'a => element = "%identity"
 @val external document: document = "document"
 @send external createElement: (document, string) => element = "createElement"
 @send @return(nullable) external querySelector: (document, string) => option<element> = "querySelector"
-@send external querySelectorAllDoc: (document, string) => array<element> = "querySelectorAll"
 @get external readyState: document => string = "readyState"
 @send external addDocListener: (document, string, unit => unit) => unit = "addEventListener"
 @send external removeDocListener: (document, string, unit => unit) => unit = "removeEventListener"
 
-// querySelectorAll returns NodeList, we need Array — keep one %raw for this
-let querySelectorAll: ('a, string) => array<element> = %raw(`
-  function(root, sel) { return Array.from(root.querySelectorAll(sel)); }
-`)
+// ── NodeList → Array conversion ─────────────────────────────────────────────
 
-// ── Element — property access via @get/@set ─────────────────────────────────
+@send external _querySelectorAllRaw: ('a, string) => nodeList = "querySelectorAll"
+@val external _arrayFrom: nodeList => array<element> = "Array.from"
+
+let querySelectorAll = (root: 'a, sel: string): array<element> =>
+  root->_querySelectorAllRaw(sel)->_arrayFrom
+
+// ── Element — properties via @get/@set ──────────────────────────────────────
 
 @get external parentElement: element => Nullable.t<element> = "parentElement"
 @get external parentNode: element => Nullable.t<element> = "parentNode"
@@ -34,6 +36,12 @@ let querySelectorAll: ('a, string) => array<element> = %raw(`
 @get external previousElementSibling: element => Nullable.t<element> = "previousElementSibling"
 @set external setTextContent: (element, string) => unit = "textContent"
 @set external setInnerHTML: (element, string) => unit = "innerHTML"
+@get external _childrenRaw: element => nodeList = "children"
+let getChildren = (el: element): array<element> => el->_childrenRaw->_arrayFrom
+
+// Can't use @get with dotted path "children.length" — ReScript treats it as literal prop name.
+// Use the children array length instead.
+let hasChildren = (el: element): bool => el->getChildren->Array.length > 0
 
 // ── Element — methods via @send ─────────────────────────────────────────────
 
@@ -44,40 +52,27 @@ let querySelectorAll: ('a, string) => array<element> = %raw(`
 @send external replaceWith: (element, element) => unit = "replaceWith"
 @send external cloneNode: (element, bool) => element = "cloneNode"
 @send external addEventListener: (element, string, {..} => unit) => unit = "addEventListener"
-@send @return(nullable) external elQuerySelector: (element, string) => option<element> = "querySelector"
-@send external elQuerySelectorAll: (element, string) => array<element> = "querySelectorAll"
-
-// ── Element — children ──────────────────────────────────────────────────────
-
-let getChildren: element => array<element> = %raw(`
-  function(el) { return Array.from(el.children); }
-`)
-let hasChildren: element => bool = %raw(`
-  function(el) { return el.children && el.children.length > 0; }
-`)
 
 // ── HTMLTemplateElement ─────────────────────────────────────────────────────
 
-let isTemplate: element => bool = %raw(`
-  function(el) { return el instanceof HTMLTemplateElement; }
-`)
-let getTemplateFirstChild: element => Nullable.t<element> = %raw(`
-  function(tpl) { return tpl.content.firstElementChild; }
-`)
-let appendToTemplateContent: (element, element) => unit = %raw(`
-  function(tpl, node) { tpl.content.appendChild(node); }
-`)
-let getTemplateChildren: element => array<element> = %raw(`
-  function(tpl) { return Array.from(tpl.content.children); }
-`)
+@get external _content: element => element = "content"
+@get @return(nullable) external _firstElementChild: element => option<element> = "firstElementChild"
+@send external _appendChild: (element, element) => unit = "appendChild"
 
-// ── HTMLInputElement ────────────────────────────────────────────────────────
+let isTemplate: element => bool = %raw(`function(el) { return el instanceof HTMLTemplateElement; }`)
+let getTemplateFirstChild = (tpl: element): option<element> => tpl->_content->_firstElementChild
+let appendToTemplateContent = (tpl: element, node: element): unit => tpl->_content->_appendChild(node)
+let getTemplateChildren = (tpl: element): array<element> => tpl->_content->_childrenRaw->_arrayFrom
+
+// ── instanceof checks — need %raw (no ReScript equivalent for instanceof) ──
 
 let isHTMLElement: element => bool = %raw(`function(el) { return el instanceof HTMLElement; }`)
 let isInput: element => bool = %raw(`function(el) { return el instanceof HTMLInputElement; }`)
 let isTextArea: element => bool = %raw(`function(el) { return el instanceof HTMLTextAreaElement; }`)
 let isSelect: element => bool = %raw(`function(el) { return el instanceof HTMLSelectElement; }`)
 let isElementInstance: element => bool = %raw(`function(el) { return el instanceof Element; }`)
+
+// ── Input properties via @get/@set ──────────────────────────────────────────
 
 @get external inputType: element => string = "type"
 @get external inputValue: element => string = "value"
@@ -88,16 +83,15 @@ let isElementInstance: element => bool = %raw(`function(el) { return el instance
 
 // ── MutationObserver ────────────────────────────────────────────────────────
 
-let makeObserver: (unit => unit) => Nullable.t<observer> = %raw(`
-  function(cb) {
-    if (typeof MutationObserver === 'undefined') return null;
-    return new MutationObserver(cb);
-  }
-`)
-let observe: observer => unit = %raw(`
-  function(obs) { obs.observe(document, { childList: true, subtree: true }); }
-`)
+@new external _newObserver: (unit => unit) => observer = "MutationObserver"
+@send external _observe: (observer, document, {..}) => unit = "observe"
 @send external disconnect: observer => unit = "disconnect"
+
+let makeObserver = (cb: unit => unit): option<observer> =>
+  try { Some(_newObserver(cb)) } catch { | _ => None }
+
+let observe = (obs: observer): unit =>
+  obs->_observe(document, {"childList": true, "subtree": true})
 
 // ── Custom Elements (genuinely needs %raw — class extends) ──────────────────
 

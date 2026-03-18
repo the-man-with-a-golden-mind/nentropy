@@ -1,43 +1,41 @@
 // ─── Js.res ───────────────────────────────────────────────────────────────────
-// Minimal JS interop — only things that genuinely need FFI.
-// No {..}, no jsObj — uses `unknown` for dynamic values, proper types elsewhere.
+// Minimal JS interop. %raw only where ReScript has no equivalent syntax.
 
-// ── Zero-cost casts ─────────────────────────────────────────────────────────
+// ── Zero-cost cast ──────────────────────────────────────────────────────────
 
 external cast: 'a => 'b = "%identity"
 
-// ── typeof / instanceof ─────────────────────────────────────────────────────
+// ── typeof — use Typeof module from ReScript ────────────────────────────────
 
-let typeof_: unknown => string = %raw(`function(v) { return typeof v; }`)
 let isNull: unknown => bool = %raw(`function(v) { return v === null; }`)
+let isUndefined: unknown => bool = %raw(`function(v) { return v === undefined; }`)
 let isObject: unknown => bool = %raw(`function(v) { return typeof v === 'object' && v !== null; }`)
 let isFunction: unknown => bool = %raw(`function(v) { return typeof v === 'function'; }`)
-let isUndefined: unknown => bool = %raw(`function(v) { return v === undefined; }`)
-
-@scope("Array") @val external isArray: unknown => bool = "isArray"
 let isPromise: unknown => bool = %raw(`function(v) { return v instanceof Promise; }`)
 
-// ── Object operations ───────────────────────────────────────────────────────
+// These stay %raw — ReScript has no `typeof` or `instanceof` operator for unknown values.
+// But they're tiny inlineable one-liners, V8 handles them fine.
+
+@scope("Array") @val external isArray: unknown => bool = "isArray"
+
+// ── Object operations — @val externals ──────────────────────────────────────
 
 @val external objectKeys: unknown => array<string> = "Object.keys"
 @val external jsonStringify: unknown => string = "JSON.stringify"
 
+// Dynamic property access — genuinely needs runtime, no static equivalent
 let getProp: (unknown, string) => unknown = %raw(`function(o, k) { return o[k]; }`)
-
 let callFn: unknown => unknown = %raw(`function(fn) { return fn(); }`)
 
-// ── Symbol (one global instance) ────────────────────────────────────────────
-
-let enPrefixSym: Symbol.t = %raw(`Symbol.for("@en/prefix")`)
+// ── Symbol prefix operations ────────────────────────────────────────────────
+// Symbol-keyed properties can't be accessed via ReScript — needs runtime.
 
 let hasPrefix: unknown => bool = %raw(`
   function(v) { return typeof v === 'object' && v !== null && Symbol.for("@en/prefix") in v; }
 `)
-
 let getPrefix: unknown => string = %raw(`
   function(obj) { return obj[Symbol.for("@en/prefix")] || ""; }
 `)
-
 let setPrefix: (unknown, string) => unit = %raw(`
   function(obj, val) {
     Object.defineProperty(obj, Symbol.for("@en/prefix"), {
@@ -46,32 +44,40 @@ let setPrefix: (unknown, string) => unit = %raw(`
   }
 `)
 
-// ── Reflect ─────────────────────────────────────────────────────────────────
+// ── Reflect — @scope/@val zero-cost bindings ────────────────────────────────
 
-let reflectGet: (unknown, string) => unknown = %raw(`
-  function(t, p) { return Reflect.get(t, p, t); }
-`)
+@scope("Reflect") @val external reflectGet3: (unknown, string, unknown) => unknown = "get"
+@scope("Reflect") @val external reflectSet3: (unknown, string, unknown) => bool = "set"
 
-let reflectSet: (unknown, string, unknown) => unit = %raw(`
-  function(t, p, v) { Reflect.set(t, p, v); }
-`)
+let reflectGet = (target: unknown, prop: string): unknown =>
+  reflectGet3(target, prop, target)
 
-// ── Promise ─────────────────────────────────────────────────────────────────
+let reflectSet = (target: unknown, prop: string, value: unknown): unit =>
+  reflectSet3(target, prop, value)->ignore
 
-let promiseThen: (unknown, unknown => unit) => unit = %raw(`
-  function(p, fn) { p.then(fn); }
-`)
+// ── Promise — @send zero-cost bindings ──────────────────────────────────────
 
-let promiseThenCatch: (unknown, unknown => unit, unknown => unit) => unit = %raw(`
-  function(p, ok, err) { p.then(ok).catch(err); }
-`)
+@send external _then: (unknown, unknown => unit) => unknown = "then"
+@send external _catch: (unknown, unknown => unit) => unknown = "catch"
+
+let promiseThen = (p: unknown, ok: unknown => unit): unit =>
+  p->_then(ok)->ignore
+
+let promiseThenCatch = (p: unknown, ok: unknown => unit, err: unknown => unit): unit =>
+  p->_then(ok)->_catch(err)->ignore
 
 // ── Regex ───────────────────────────────────────────────────────────────────
 
 let digitRe = /^\d+$/
 let isDigitString = (s: string): bool => digitRe->RegExp.test(s)
 
-// ── Clone ───────────────────────────────────────────────────────────────────
+let trailingDigitsRe = /\d+$/
+let replaceTrailingDigits = (s: string, replacement: string): string =>
+  s->String.replaceRegExp(trailingDigitsRe, replacement)
+
+let parseInt: string => float = %raw(`function(s) { return +(s); }`)
+
+// ── Clone — needs %raw (instanceof checks, Object.create, recursive) ───────
 
 let clone: 'a => 'a = %raw(`
   function clone(t) {
@@ -87,6 +93,6 @@ let clone: 'a => 'a = %raw(`
   }
 `)
 
-// ── Map with key iteration ──────────────────────────────────────────────────
+// ── Map iteration ───────────────────────────────────────────────────────────
 
 @send external mapForEach: (Map.t<'k, 'v>, ('v, 'k) => unit) => unit = "forEach"

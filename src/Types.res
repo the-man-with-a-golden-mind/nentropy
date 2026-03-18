@@ -59,6 +59,17 @@ type syncConfig = {
   skipMark: bool,
 }
 
+// ── Element Registry types ───────────────────────────────────────────────────
+// Defined here (not in Registry.res) to avoid circular dependency.
+
+type registryEntry = {
+  el: EnDom.element,
+  directive: string,
+  param: option<string>,
+}
+
+type registry = Map.t<string, array<registryEntry>>
+
 // ── Context — central state for one instance ────────────────────────────────
 
 type context = {
@@ -70,9 +81,8 @@ type context = {
   computedResultFns: WeakSet.t<unknown>,
   mutable batchQueue: option<array<unit => unit>>,
   mutable destroyed: bool,
-  elementCache: Map.t<string, array<EnDom.element>>,
+  registry: registry, // live element index — replaces querySelectorAll
   mutable observer: option<EnDom.observer>,
-  mutable useCache: bool,
 }
 
 // ── getValue result ─────────────────────────────────────────────────────────

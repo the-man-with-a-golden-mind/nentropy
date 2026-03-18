@@ -13,7 +13,7 @@ let createInstance: unit => {..} = %raw(`
         return Instance.directive(inst, name, cb, isParametric || false);
       },
       prefix: function(value) { return Instance.prefix(inst, value || 'en'); },
-      cache: function(enabled) { return Instance.cache(inst, enabled); },
+      cache: function() { /* no-op — registry-based, no cache needed */ },
       batch: function(fn) { return Instance.batch(inst, fn); },
       load: function(files) {
         return Instance.load(inst, Array.isArray(files) ? files : [files]);

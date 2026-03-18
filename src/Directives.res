@@ -5,6 +5,10 @@ open Types
 let registerDirective = (ctx: context, name: string, cb: directive, ~isParametric=false): unit =>
   if !(ctx.directives->Map.has(name)) {
     ctx.directives->Map.set(name, {cb, isParametric})->ignore
+    // Scan existing DOM for elements that use this new directive
+    let attrName = ctx.prefix + name
+    EnDom.querySelectorAll(EnDom.document, `[${attrName}]`)
+    ->Array.forEach(el => Registry.scanAndRegister(ctx.registry, el, ctx))
   }
 
 // ── mark ────────────────────────────────────────────────────────────────────

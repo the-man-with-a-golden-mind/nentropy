@@ -1,7 +1,9 @@
 // ─── Core.res ─────────────────────────────────────────────────────────────────
-// Reactive engine. Proper types — no {..}, no jsObj.
-// `unknown` for dynamic reactive values, `EnDom.element` for DOM.
-// `let rec ... and ...` for mutual recursion — no ref indirection.
+// Reactive engine with Element Registry.
+//
+// callDirectivesForLeaf uses Registry.lookup — O(1) Map hit, no querySelectorAll.
+// syncNode/syncClone rewritten in pure ReScript.
+// Array DOM ops still %raw (template content access) but register on clone.
 
 open Types
 
@@ -16,7 +18,7 @@ let scheduleUpdate = (ctx: context, fn: unit => unit): unit =>
   }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Forward ref for reactive (only used by proxyComputed — not hot loop)
+// Forward ref for reactive (only used by proxyComputed)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let reactiveRef: ref<(context, unknown, string, option<unknown>, option<string>) => unknown> =
@@ -28,7 +30,7 @@ let proxyComputed = (
   key: option<string>,
   parent: option<unknown>,
   prop: option<string>,
-): unknown => {
+): unknown =>
   if Js.isFunction(value) {
     ctx.computedResultFns->WeakSet.add(value)->ignore
     value
@@ -39,221 +41,413 @@ let proxyComputed = (
     | _ => cloned
     }
   }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// P2: Sync functions — pure ReScript
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Forward ref needed because syncDirectives calls update which isn't defined yet
+let updateFnRef: ref<(context, unknown, string, bool, unknown, string, option<syncConfig>) => unit> =
+  ref((_, _, _, _, _, _, _) => ())
+
+let syncDirectives = (ctx: context, el: EnDom.element, skipConditionals: bool, skipMark: bool): unit =>
+  ctx.directives->Js.mapForEach((dirEntry, name) => {
+    if skipMark && name === "mark" {
+      ()
+    } else if skipConditionals && (name === "if" || name === "ifnot") {
+      ()
+    } else {
+      let attrFull = ctx.prefix + name
+      switch el->EnDom.getAttribute(attrFull) {
+      | None => ()
+      | Some(rawKey) => {
+          let key = if dirEntry.isParametric {
+            let i = rawKey->String.indexOf(":")
+            if i >= 0 { rawKey->String.slice(~start=0, ~end=i) } else { rawKey }
+          } else {
+            rawKey
+          }
+          let key = if key->String.endsWith(".#") {
+            key->String.slice(~start=0, ~end=key->String.length - 2)
+          } else {
+            key
+          }
+          let result = DomQuery.getValue(ctx, key)
+          switch result.parent {
+          | None => ()
+          | Some(_) =>
+            updateFnRef.contents(
+              ctx,
+              result.value,
+              key,
+              false,
+              result.parent->Option.getUnsafe,
+              result.prop,
+              Some({directive: name, el, skipConditionals, skipMark}),
+            )
+          }
+        }
+      }
+    }
+  })
+
+let rec syncNode = (ctx: context, el: EnDom.element, isSyncRoot: bool): unit => {
+  EnDom.getChildren(el)->Array.forEach(child => syncNode(ctx, child, false))
+  syncDirectives(ctx, el, isSyncRoot, false)
+}
+
+let rec syncClone = (ctx: context, el: EnDom.element): unit => {
+  EnDom.getChildren(el)->Array.forEach(child => syncClone(ctx, child))
+  // Register this element in the registry BEFORE syncing directives
+  Registry.scanAndRegister(ctx.registry, el, ctx)
+  syncDirectives(ctx, el, false, true)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// DOM helpers — %raw only where genuinely unavoidable
+// ifOrIfNot — rewritten in ReScript (P2)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-let ifOrIfNot: (
-  context,
-  EnDom.element,
-  unknown,
-  string,
-  conditionalType,
-  (context, EnDom.element, bool) => unit,
-) => unit = %raw(`
-  function(ctx, el, value, key, type, syncNodeFn) {
-    var isShow = type === "If" ? !!value : !value;
-    var isTemplate = el instanceof HTMLTemplateElement;
-    var attrType = ctx.prefix + (type === "If" ? "if" : "ifnot");
-    var attrMark = ctx.prefix + "mark";
-    if (isShow && isTemplate) {
-      var children = Array.from(el.content.children);
-      if (!children.length) return;
-      children.forEach(function(child) {
-        var clone = child.cloneNode(true);
-        clone.setAttribute(attrType, key);
-        syncNodeFn(ctx, clone, true);
-        el.before(clone);
-      });
-      el.remove();
-    }
-    if (!isShow && !isTemplate) {
-      if (!el.parentNode) return;
-      var siblings = [el];
-      var next = el.nextElementSibling;
-      while (next && next.getAttribute(attrType) === key) { siblings.push(next); next = next.nextElementSibling; }
-      var temp = document.createElement('template');
-      siblings.forEach(function(s) { temp.content.appendChild(s.cloneNode(true)); });
-      temp.setAttribute(attrType, key);
-      var mark = el.getAttribute(attrMark);
-      if (mark) temp.setAttribute(attrMark, mark);
-      el.replaceWith(temp);
-      siblings.slice(1).forEach(function(s) { s.remove(); });
+let ifOrIfNot = (
+  ctx: context,
+  el: EnDom.element,
+  value: unknown,
+  key: string,
+  condType: conditionalType,
+): unit => {
+  let isShow = switch condType {
+  | If => Js.cast(value) === true || (Js.isObject(value) && !Js.isNull(value))
+  | IfNot => Js.cast(value) === false || Js.isNull(value) || Js.isUndefined(value)
+  }
+  // Truthiness: for If, any truthy value. For IfNot, any falsy value.
+  let isShow = switch condType {
+  | If => !Js.isNull(value) && !Js.isUndefined(value) && Js.cast(value) !== false && Js.cast(value) !== 0
+  | IfNot => Js.isNull(value) || Js.isUndefined(value) || Js.cast(value) === false || Js.cast(value) === 0
+  }
+  let isTemplate = EnDom.isTemplate(el)
+  let attrType = ctx.prefix + (switch condType { | If => "if" | IfNot => "ifnot" })
+  let attrMark = ctx.prefix + "mark"
+
+  // Show: template → clone children, register, sync, insert
+  if isShow && isTemplate {
+    let children = EnDom.getTemplateChildren(el)
+    if children->Array.length > 0 {
+      children->Array.forEach(child => {
+        let clone = child->EnDom.cloneNode(true)
+        clone->EnDom.setAttribute(attrType, key)
+        // Register BEFORE sync — sync triggers update which needs registry lookup
+        Registry.scanTree(ctx.registry, clone, ctx)
+        syncNode(ctx, clone, true)
+        el->EnDom.before(clone)
+      })
+      Registry.unregisterElement(ctx.registry, el)
+      el->EnDom.remove
     }
   }
-`)
 
-let syncDirectivesImpl: (
-  context,
-  EnDom.element,
-  bool,
-  bool,
-  (context, unknown, string, bool, unknown, string, option<syncConfig>) => unit,
-) => unit = %raw(`
-  function(ctx, el, skipConditionals, skipMark, updateFn) {
-    ctx.directives.forEach(function(dirEntry, name) {
-      if (skipMark && name === 'mark') return;
-      if (skipConditionals && (name === 'if' || name === 'ifnot')) return;
-      var attrFull = ctx.prefix + name;
-      var key = el.getAttribute(attrFull);
-      if (dirEntry.isParametric && key) key = key.split(':')[0];
-      if (key && key.endsWith('.#')) key = key.slice(0, -2);
-      if (key === null) return;
-      var result = DomQuery.getValue(ctx, key);
-      if (!result.parent) return;
-      updateFn(ctx, result.value, key, false, result.parent, result.prop, {
-        directive: name, el: el, skipConditionals: skipConditionals, skipMark: skipMark
-      });
-    });
-  }
-`)
+  // Hide: collect siblings, wrap in template
+  if !isShow && !isTemplate {
+    switch el->EnDom.parentNode->Nullable.toOption {
+    | None => ()
+    | Some(_) => {
+        let siblings = [el]
+        let rec collectSiblings = (current: EnDom.element) =>
+          switch current->EnDom.nextElementSibling->Nullable.toOption {
+          | Some(next) =>
+            switch next->EnDom.getAttribute(attrType) {
+            | Some(attr) if attr === key =>
+              siblings->Array.push(next)
+              collectSiblings(next)
+            | _ => ()
+            }
+          | None => ()
+          }
+        collectSiblings(el)
 
-let syncNodeImpl: (
-  context, EnDom.element, bool,
-  (context, unknown, string, bool, unknown, string, option<syncConfig>) => unit,
-) => unit = %raw(`
-  function syncNodeImpl(ctx, el, isSyncRoot, updateFn) {
-    Array.from(el.children).forEach(function(c) { syncNodeImpl(ctx, c, false, updateFn); });
-    syncDirectivesImpl(ctx, el, isSyncRoot, false, updateFn);
-  }
-`)
+        let temp = EnDom.document->EnDom.createElement("template")
+        siblings->Array.forEach(s => {
+          let clone = s->EnDom.cloneNode(true)
+          temp->EnDom.appendToTemplateContent(clone)
+        })
+        temp->EnDom.setAttribute(attrType, key)
+        switch el->EnDom.getAttribute(attrMark) {
+        | Some(mark) => temp->EnDom.setAttribute(attrMark, mark)
+        | None => ()
+        }
 
-let syncCloneImpl: (
-  context, EnDom.element,
-  (context, unknown, string, bool, unknown, string, option<syncConfig>) => unit,
-) => unit = %raw(`
-  function syncCloneImpl(ctx, clone, updateFn) {
-    Array.from(clone.children).forEach(function(c) { syncCloneImpl(ctx, c, updateFn); });
-    syncDirectivesImpl(ctx, clone, false, true, updateFn);
+        // Unregister all siblings from registry
+        siblings->Array.forEach(s => Registry.unregisterElement(ctx.registry, s))
+
+        el->EnDom.replaceWith(temp)
+        // Register the new template in the registry so it can be found on re-show
+        Registry.scanAndRegister(ctx.registry, temp, ctx)
+        // Remove remaining siblings
+        siblings
+        ->Array.sliceToEnd(~start=1)
+        ->Array.forEach(s => s->EnDom.remove)
+      }
+    }
   }
-`)
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Array DOM management
+// Array DOM management — still %raw for template content, but registers clones
 // ═══════════════════════════════════════════════════════════════════════════════
 
-let initializeArrayElements: (
-  context, EnDom.element, string, unknown,
-  (context, unknown, string, bool, unknown, string, option<syncConfig>) => unit,
-) => array<EnDom.element> = %raw(`
-  function(ctx, plc, placeholderKey, array, updateFn) {
+let rewriteCloneKeys = (ctx: context, clone: EnDom.element, key: string, placeholderKey: string): unit => {
+  // Collect attr names once
+  let attrNames = []
+  ctx.directives->Js.mapForEach((_, name) => attrNames->Array.push(ctx.prefix + name))
+
+  // Rewrite on clone itself
+  attrNames->Array.forEach(attrName =>
+    switch clone->EnDom.getAttribute(attrName) {
+    | Some(cur) if cur->String.startsWith(placeholderKey) =>
+      clone->EnDom.setAttribute(attrName, key + cur->String.sliceToEnd(~start=placeholderKey->String.length))
+    | _ => ()
+    }
+  )
+  // Rewrite on all descendants
+  EnDom.querySelectorAll(clone, "*")->Array.forEach(child =>
+    attrNames->Array.forEach(attrName =>
+      switch child->EnDom.getAttribute(attrName) {
+      | Some(cur) if cur->String.startsWith(placeholderKey) =>
+        child->EnDom.setAttribute(attrName, key + cur->String.sliceToEnd(~start=placeholderKey->String.length))
+      | _ => ()
+      }
+    )
+  )
+}
+
+// ── Remove old array item elements (walk backward from placeholder) ─────────
+
+let removeOldItems = (ctx: context, plc: EnDom.element, placeholderKey: string, attrMark: string): unit => {
+  let prev = ref(plc->EnDom.previousElementSibling->Nullable.toOption)
+  let continue_ = ref(true)
+  while prev.contents !== None && continue_.contents {
+    let curr = prev.contents->Option.getUnsafe
+    prev := curr->EnDom.previousElementSibling->Nullable.toOption
+    switch curr->EnDom.getAttribute(attrMark) {
+    | None => () // skip, keep going
+    | Some(k) =>
+      if k !== placeholderKey && Js.replaceTrailingDigits(k, "#") === placeholderKey {
+        Registry.unregisterElement(ctx.registry, curr)
+        curr->EnDom.remove
+      } else {
+        continue_ := false
+      }
+    }
+  }
+}
+
+// ── Resolve template placeholder ────────────────────────────────────────────
+
+type templateResolution = {template: EnDom.element, placeholder: option<EnDom.element>}
+
+let resolveTemplate: (EnDom.element, string, string) => templateResolution = %raw(`
+  function(plc, placeholderKey, attrMark) {
+    if (plc instanceof HTMLTemplateElement) {
+      var ph = plc.content.firstElementChild;
+      if (ph) ph.setAttribute(attrMark, placeholderKey);
+      return { template: plc, placeholder: ph || undefined };
+    } else {
+      var template = document.createElement('template');
+      template.content.appendChild(plc.cloneNode(true));
+      template.setAttribute(attrMark, placeholderKey);
+      plc.replaceWith(template);
+      return { template: template, placeholder: plc };
+    }
+  }
+`)
+
+// ── Initialize array elements ────────────────────────────────────────────────
+// Uses %raw for template content access (happy-dom cloneNode quirk with
+// DocumentFragment requires the clone to happen in the same JS scope as
+// the template resolution).
+
+let initializeArrayElements: (context, EnDom.element, string, unknown) => array<EnDom.element> = %raw(`
+  function(ctx, plc, placeholderKey, array) {
     var attrMark = ctx.prefix + 'mark';
     var prev = plc.previousElementSibling;
     while (prev) {
       var curr = prev; prev = curr.previousElementSibling;
       var k = curr.getAttribute(attrMark);
       if (!k) continue;
-      if (k !== placeholderKey && k.replace(/\d+$/, '#') === placeholderKey) curr.remove();
-      else break;
+      if (k !== placeholderKey && k.replace(/\d+$/, '#') === placeholderKey) {
+        Registry.unregisterElement(ctx.registry, curr);
+        curr.remove();
+      } else break;
     }
     var template, placeholder;
     if (plc instanceof HTMLTemplateElement) {
       template = plc; placeholder = plc.content.firstElementChild;
       if (placeholder) placeholder.setAttribute(attrMark, placeholderKey);
     } else {
-      placeholder = plc; template = document.createElement('template');
-      template.content.appendChild(plc.cloneNode(true));
-      template.setAttribute(attrMark, placeholderKey); plc.replaceWith(template);
+      template = document.createElement('template');
+      // Use innerHTML to preserve children in happy-dom (cloneNode(true) on
+      // DocumentFragment firstElementChild drops child nodes in happy-dom)
+      template.innerHTML = plc.outerHTML;
+      template.setAttribute(attrMark, placeholderKey);
+      plc.replaceWith(template);
+      placeholder = template.content.firstElementChild;
     }
     if (!placeholder) return [];
+    // Cache outerHTML for cloning — happy-dom's cloneNode(true) on elements
+    // inside DocumentFragment drops child nodes. innerHTML parse preserves them.
+    var phHTML = placeholder.outerHTML;
     var prefix = placeholderKey.slice(0, -2), elements = [], len = array.length;
-    var attrNames = []; ctx.directives.forEach(function(_, n) { attrNames.push(ctx.prefix + n); });
+    var cloneContainer = document.createElement('div');
     for (var i = 0; i < len; i++) {
-      var clone = placeholder.cloneNode(true);
-      if (!(clone instanceof Element)) continue;
+      cloneContainer.innerHTML = phHTML;
+      var clone = cloneContainer.firstElementChild;
+      if (!clone) continue;
       var key = prefix === '' ? String(i) : prefix + '.' + i;
-      for (var j = 0; j < attrNames.length; j++) {
-        var cur = clone.getAttribute(attrNames[j]);
-        if (cur && cur.startsWith(placeholderKey)) clone.setAttribute(attrNames[j], key + cur.slice(placeholderKey.length));
-      }
-      clone.querySelectorAll('*').forEach(function(child) {
-        for (var j = 0; j < attrNames.length; j++) {
-          var cur = child.getAttribute(attrNames[j]);
-          if (cur && cur.startsWith(placeholderKey)) child.setAttribute(attrNames[j], key + cur.slice(placeholderKey.length));
-        }
-      });
-      template.before(clone); syncCloneImpl(ctx, clone, updateFn); elements.push(clone);
+      rewriteCloneKeys(ctx, clone, key, placeholderKey);
+      template.before(clone);
+      syncClone(ctx, clone);
+      elements.push(clone);
     }
     return elements;
   }
 `)
 
-let updateArrayItemElement: (
-  context, string, string, unknown, unknown,
-  (context, unknown, string, bool, unknown, string, option<syncConfig>) => unit,
-) => unit = %raw(`
-  function(ctx, key, idx, item, array, updateFn) {
-    var attrMark = ctx.prefix + 'mark', SYM = Symbol.for("@en/prefix");
-    var arrayItems = document.querySelectorAll('[' + attrMark + '="' + key + '"]');
-    if (arrayItems.length && (typeof item !== 'object' || item === null || !(SYM in item))) return;
-    var prefix = array[SYM] || '', placeholderKey = key.replace(/\d+$/, '#'), itemReplaced = false;
-    Array.from(arrayItems).forEach(function(el) {
-      var ph = el.nextElementSibling;
-      while (ph) { if (ph.getAttribute(attrMark) === placeholderKey) break; ph = ph.nextElementSibling; }
-      var cl = null;
-      if (ph instanceof HTMLTemplateElement) { var c = ph.content.firstElementChild; cl = c ? c.cloneNode(true) : null; }
-      else if (ph && ph.getAttribute(attrMark) === placeholderKey) cl = ph.cloneNode(true);
-      if (!cl) return;
-      var attrNames = []; ctx.directives.forEach(function(_, n) { attrNames.push(ctx.prefix + n); });
-      var k = prefix === '' ? idx : prefix + '.' + idx;
-      for (var j = 0; j < attrNames.length; j++) {
-        var cur = cl.getAttribute(attrNames[j]);
-        if (cur && cur.startsWith(placeholderKey)) cl.setAttribute(attrNames[j], k + cur.slice(placeholderKey.length));
-      }
-      cl.querySelectorAll('*').forEach(function(child) {
-        for (var j = 0; j < attrNames.length; j++) {
-          var cur = child.getAttribute(attrNames[j]);
-          if (cur && cur.startsWith(placeholderKey)) child.setAttribute(attrNames[j], k + cur.slice(placeholderKey.length));
-        }
-      });
-      el.replaceWith(cl); syncCloneImpl(ctx, cl, updateFn); itemReplaced = true;
-    });
-    if (itemReplaced) return;
-    Array.from(document.querySelectorAll('[' + attrMark + '="' + placeholderKey + '"]')).forEach(function(tpl) {
-      if (!(tpl instanceof HTMLTemplateElement)) return;
-      var clone = tpl.content.firstElementChild; if (!clone) return; clone = clone.cloneNode(true);
-      var attrNames = []; ctx.directives.forEach(function(_, n) { attrNames.push(ctx.prefix + n); });
-      var k = prefix === '' ? idx : prefix + '.' + idx;
-      for (var j = 0; j < attrNames.length; j++) {
-        var cur = clone.getAttribute(attrNames[j]);
-        if (cur && cur.startsWith(placeholderKey)) clone.setAttribute(attrNames[j], k + cur.slice(placeholderKey.length));
-      }
-      clone.querySelectorAll('*').forEach(function(child) {
-        for (var j = 0; j < attrNames.length; j++) {
-          var cur = child.getAttribute(attrNames[j]);
-          if (cur && cur.startsWith(placeholderKey)) child.setAttribute(attrNames[j], k + cur.slice(placeholderKey.length));
-        }
-      });
-      tpl.before(clone); syncCloneImpl(ctx, clone, updateFn);
-    });
-  }
-`)
+// ── Find placeholder template after an element ──────────────────────────────
 
-let sortArrayItemElements: (context, unknown) => unit = %raw(`
-  function(ctx, array) {
-    var attrMark = ctx.prefix + 'mark', SYM = Symbol.for("@en/prefix");
-    var prefix = array[SYM] || '';
-    var templateKey = prefix === '' ? '#' : prefix + '.#', templatePrefix = templateKey.slice(0, -1);
-    Array.from(document.querySelectorAll('[' + attrMark + '="' + templateKey + '"]')).forEach(function(tpl) {
-      var items = [], prev = tpl.previousElementSibling, isSorted = true, lastIdx = -1;
-      while (prev) {
-        var curr = prev; prev = curr.previousElementSibling;
-        var k = curr.getAttribute(attrMark); if (!k) continue; if (k === templateKey) break;
-        if (k.startsWith(templatePrefix)) {
-          var idx = +(k.slice(templatePrefix.length));
-          if (!isNaN(idx)) { items.push({el:curr,idx:idx}); if (isSorted && lastIdx!==-1 && lastIdx!==idx+1) isSorted=false; lastIdx=idx; }
+let findPlaceholderAfter = (el: EnDom.element, placeholderKey: string, attrMark: string): option<EnDom.element> => {
+  let ph = ref(el->EnDom.nextElementSibling->Nullable.toOption)
+  let result = ref(None)
+  while ph.contents !== None && result.contents === None {
+    let current = ph.contents->Option.getUnsafe
+    switch current->EnDom.getAttribute(attrMark) {
+    | Some(attr) if attr === placeholderKey => result := Some(current)
+    | _ => ph := current->EnDom.nextElementSibling->Nullable.toOption
+    }
+  }
+  result.contents
+}
+
+// ── Clone from template/placeholder ─────────────────────────────────────────
+
+let cloneFromPlaceholder = (ph: EnDom.element): option<EnDom.element> =>
+  if EnDom.isTemplate(ph) {
+    switch ph->EnDom.getTemplateFirstChild {
+    | Some(c) => Some(c->EnDom.cloneNode(true))
+    | None => None
+    }
+  } else {
+    Some(ph->EnDom.cloneNode(true))
+  }
+
+// ── Update array item element — pure ReScript ───────────────────────────────
+
+let updateArrayItemElement = (
+  ctx: context,
+  key: string,
+  idx: string,
+  item: unknown,
+  array: unknown,
+): unit => {
+  let attrMark = ctx.prefix + "mark"
+
+  // Find existing items via registry
+  let entries = Registry.lookup(ctx.registry, key)
+  let markEntries = entries->Array.filter(e => e.directive === "mark")
+
+  // Primitive items: text update only (no DOM replacement needed)
+  if markEntries->Array.length > 0 && !Js.hasPrefix(item) {
+    () // callDirectivesForLeaf will update textContent via mark directive
+  } else {
+    let prefix = Js.getPrefix(array)
+    let placeholderKey = Js.replaceTrailingDigits(key, "#")
+    let itemReplaced = ref(false)
+
+    markEntries->Array.forEach(entry => {
+      let el = entry.el
+      switch findPlaceholderAfter(el, placeholderKey, attrMark) {
+      | None => ()
+      | Some(ph) =>
+        switch cloneFromPlaceholder(ph) {
+        | None => ()
+        | Some(cl) => {
+            let k = if prefix === "" { idx } else { prefix + "." + idx }
+            rewriteCloneKeys(ctx, cl, k, placeholderKey)
+            Registry.unregisterElement(ctx.registry, el)
+            el->EnDom.replaceWith(cl)
+            syncClone(ctx, cl)
+            itemReplaced := true
+          }
         }
       }
-      if (isSorted) return;
-      items.sort(function(a,b){return a.idx-b.idx;}).forEach(function(it){tpl.before(it.el);});
-    });
+    })
+
+    if !itemReplaced.contents {
+      // No existing item — find templates and insert before them
+      let query = `[${attrMark}="${placeholderKey}"]`
+      EnDom.querySelectorAll(EnDom.document, query)->Array.forEach(tpl => {
+        if EnDom.isTemplate(tpl) {
+          switch tpl->EnDom.getTemplateFirstChild {
+          | None => ()
+          | Some(firstChild) => {
+              let clone = firstChild->EnDom.cloneNode(true)
+              let k = if prefix === "" { idx } else { prefix + "." + idx }
+              rewriteCloneKeys(ctx, clone, k, placeholderKey)
+              tpl->EnDom.before(clone)
+              syncClone(ctx, clone)
+            }
+          }
+        }
+      })
+    }
   }
-`)
+}
+
+// ── Sort array item elements — pure ReScript ────────────────────────────────
+
+type sortEntry = {el: EnDom.element, idx: int}
+
+let sortArrayItemElements = (ctx: context, array: unknown): unit => {
+  let attrMark = ctx.prefix + "mark"
+  let prefix = Js.getPrefix(array)
+  let templateKey = if prefix === "" { "#" } else { prefix + ".#" }
+  let templatePrefix = templateKey->String.slice(~start=0, ~end=templateKey->String.length - 1)
+
+  EnDom.querySelectorAll(EnDom.document, `[${attrMark}="${templateKey}"]`)->Array.forEach(tpl => {
+    let items: array<sortEntry> = []
+    let prev = ref(tpl->EnDom.previousElementSibling->Nullable.toOption)
+    let isSorted = ref(true)
+    let lastIdx = ref(-1)
+
+    let continue_ = ref(true)
+    while prev.contents !== None && continue_.contents {
+      let curr = prev.contents->Option.getUnsafe
+      prev := curr->EnDom.previousElementSibling->Nullable.toOption
+      switch curr->EnDom.getAttribute(attrMark) {
+      | None => () // skip
+      | Some(k) if k === templateKey => continue_ := false
+      | Some(k) if k->String.startsWith(templatePrefix) =>
+        let idxStr = k->String.sliceToEnd(~start=templatePrefix->String.length)
+        let idx = Js.parseInt(idxStr)
+        if !Float.isNaN(idx) {
+          let idxInt = Float.toInt(idx)
+          items->Array.push({el: curr, idx: idxInt})
+          if isSorted.contents && lastIdx.contents !== -1 && lastIdx.contents !== idxInt + 1 {
+            isSorted := false
+          }
+          lastIdx := idxInt
+        }
+      | _ => ()
+      }
+    }
+
+    if !isSorted.contents {
+      items
+      ->Array.toSorted((a, b) => Float.fromInt(a.idx - b.idx))
+      ->Array.forEach(item => tpl->EnDom.before(item.el))
+    }
+  })
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Mutual recursion: callDirectives ↔ update (no ref indirection)
+// P1: callDirectivesForLeaf uses Registry — O(1) lookup, no DOM query
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let rec callDirectivesForLeaf = (
@@ -263,7 +457,6 @@ let rec callDirectivesForLeaf = (
   isDelete: bool,
   parent: unknown,
   prop: string,
-  searchRoot: option<EnDom.element>,
   syncCfg: option<syncConfig>,
 ): unit =>
   switch syncCfg {
@@ -288,49 +481,12 @@ let rec callDirectivesForLeaf = (
       }
     }
   | None =>
-    let prefix = ctx.prefix
-    ctx.directives->Js.mapForEach((entry, attrSuffix) => {
-      let attrName = prefix + attrSuffix
-      let query = if entry.isParametric {
-        `[${attrName}^='${key}:']`
-      } else {
-        `[${attrName}='${key}']`
-      }
-
-      let elements = switch searchRoot {
-      | Some(root) => DomQuery.queryAll(ctx, root, query)
-      | None => DomQuery.queryAllDoc(ctx, query)
-      }
-
-      elements->Array.forEach(el =>
-        entry.cb({
-          el,
-          value,
-          key,
-          isDelete,
-          parent,
-          prop,
-          param: Utils.getParam(el, attrName, entry.isParametric),
-        })
-      )
-
-      // Check root element itself for scoped searches
-      switch searchRoot {
-      | Some(root) =>
-        switch root->EnDom.getAttribute(attrName) {
-        | Some(attr) if attr === key =>
-          entry.cb({
-            el: root,
-            value,
-            key,
-            isDelete,
-            parent,
-            prop,
-            param: Utils.getParam(root, attrName, entry.isParametric),
-          })
-        | _ => ()
-        }
+    // P1: Registry lookup — no querySelectorAll, no query building
+    Registry.lookup(ctx.registry, key)->Array.forEach(entry => {
+      switch ctx.directives->Map.get(entry.directive) {
       | None => ()
+      | Some(dirEntry) =>
+        dirEntry.cb({el: entry.el, value, key, isDelete, parent, prop, param: entry.param})
       }
     })
   }
@@ -340,20 +496,9 @@ and callDirectivesForObject = (
   value: unknown,
   key: string,
   isDelete: bool,
-  searchRoot: option<EnDom.element>,
 ): unit =>
   Js.objectKeys(value)->Array.forEach(k =>
-    callDirectives(
-      ctx,
-      Js.getProp(value, k),
-      Utils.getKey(k, key),
-      isDelete,
-      value,
-      k,
-      searchRoot,
-      false,
-      None,
-    )
+    callDirectives(ctx, Js.getProp(value, k), Utils.getKey(k, key), isDelete, value, k, false, None)
   )
 
 and callDirectivesForArray = (
@@ -363,25 +508,38 @@ and callDirectivesForArray = (
   isDelete: bool,
   parent: unknown,
   prop: string,
-  searchRoot: option<EnDom.element>,
   syncCfg: option<syncConfig>,
 ): unit => {
   let placeholderKey = key + ".#"
   let attrMark = ctx.prefix + "mark"
-  let query = `[${attrMark}="${placeholderKey}"]`
 
+  // Find placeholder templates — still need querySelectorAll for templates
+  // (templates aren't registered since they're placeholders, not bound elements)
+  let query = `[${attrMark}="${placeholderKey}"]`
   let targets = switch syncCfg {
   | Some(cfg) =>
     switch cfg.el->EnDom.parentElement->Nullable.toOption {
-    | Some(p) => DomQuery.queryAll(ctx, p, query)
-    | None => DomQuery.queryAllDoc(ctx, query)
+    | Some(p) => EnDom.querySelectorAll(p, query)
+    | None => EnDom.querySelectorAll(EnDom.document, query)
     }
-  | None => DomQuery.queryAllDoc(ctx, query)
+  | None => EnDom.querySelectorAll(EnDom.document, query)
   }
+
+  // Clear old registry entries for array item indices (items.0, items.1, etc.)
+  // but NOT items.length or items.# — those are structural, not per-item
+  let itemPrefix = key + "."
+  let lengthKey = key + ".length"
+  let toDelete = []
+  ctx.registry->Js.mapForEach((_, regKey) => {
+    if regKey->String.startsWith(itemPrefix) && regKey !== lengthKey {
+      toDelete->Array.push(regKey)
+    }
+  })
+  toDelete->Array.forEach(k => ctx.registry->Map.delete(k)->ignore)
 
   let elsArrays: array<array<EnDom.element>> = []
   targets->Array.forEach(plc => {
-    let els = initializeArrayElements(ctx, plc, placeholderKey, value, update)
+    let els = initializeArrayElements(ctx, plc, placeholderKey, value)
     elsArrays->Array.push(els)
   })
 
@@ -389,31 +547,11 @@ and callDirectivesForArray = (
   elsArrays->Array.forEach(els => {
     for i in 0 to len - 1 {
       let idx = Int.toString(i)
-      let childEl = els->Array.get(i)
-      callDirectives(
-        ctx,
-        Js.getProp(value, idx),
-        Utils.getKey(idx, key),
-        isDelete,
-        value,
-        idx,
-        childEl,
-        true,
-        None,
-      )
+      callDirectives(ctx, Js.getProp(value, idx), Utils.getKey(idx, key), isDelete, value, idx, true, None)
     }
   })
 
-  callDirectivesForLeaf(
-    ctx,
-    Js.cast(len),
-    Utils.getKey("length", key),
-    isDelete,
-    value,
-    "length",
-    searchRoot,
-    None,
-  )
+  callDirectivesForLeaf(ctx, Js.cast(len), Utils.getKey("length", key), isDelete, value, "length", None)
 }
 
 and callDirectives = (
@@ -423,19 +561,15 @@ and callDirectives = (
   isDelete: bool,
   parent: unknown,
   prop: string,
-  searchRoot: option<EnDom.element>,
   skipUpdateArrayElements: bool,
   syncCfg: option<syncConfig>,
 ): unit => {
   let isParentArr = Js.isArray(parent)
 
   if isParentArr && Js.isDigitString(prop) && !skipUpdateArrayElements {
-    let skip = switch syncCfg {
-    | Some(cfg) => cfg.skipMark
-    | None => false
-    }
+    let skip = switch syncCfg { | Some(cfg) => cfg.skipMark | None => false }
     if !skip {
-      updateArrayItemElement(ctx, key, prop, value, parent, update)
+      updateArrayItemElement(ctx, key, prop, value, parent)
     }
   } else if isParentArr && prop === "length" {
     sortArrayItemElements(ctx, parent)
@@ -443,19 +577,16 @@ and callDirectives = (
 
   if Js.hasPrefix(value) {
     if Js.isArray(value) {
-      let skip = switch syncCfg {
-      | Some(cfg) => cfg.skipMark
-      | None => false
-      }
+      let skip = switch syncCfg { | Some(cfg) => cfg.skipMark | None => false }
       if !skip {
-        callDirectivesForArray(ctx, value, key, isDelete, parent, prop, searchRoot, syncCfg)
+        callDirectivesForArray(ctx, value, key, isDelete, parent, prop, syncCfg)
       }
     } else {
-      callDirectivesForObject(ctx, value, key, isDelete, searchRoot)
-      callDirectivesForLeaf(ctx, value, key, isDelete, parent, prop, searchRoot, syncCfg)
+      callDirectivesForObject(ctx, value, key, isDelete)
+      callDirectivesForLeaf(ctx, value, key, isDelete, parent, prop, syncCfg)
     }
   } else {
-    callDirectivesForLeaf(ctx, value, key, isDelete, parent, prop, searchRoot, syncCfg)
+    callDirectivesForLeaf(ctx, value, key, isDelete, parent, prop, syncCfg)
   }
 }
 
@@ -468,20 +599,12 @@ and update = (
   prop: string,
   syncCfg: option<syncConfig>,
 ): unit => {
-  if ctx.destroyed {
-    ()
-  } else {
-    let isCompFn =
-      Js.isFunction(value) && !(ctx.computedResultFns->WeakSet.has(value))
-
-    let finalValue = if isCompFn {
-      runComputed(ctx, value, key, parent, prop)
-    } else {
-      value
-    }
+  if !ctx.destroyed {
+    let isCompFn = Js.isFunction(value) && !(ctx.computedResultFns->WeakSet.has(value))
+    let finalValue = if isCompFn { runComputed(ctx, value, key, parent, prop) } else { value }
 
     if isCompFn && Js.isUndefined(finalValue) {
-      () // async — will re-enter when resolved
+      ()
     } else if Js.isPromise(finalValue) {
       let version = Computed.bumpVersion(ctx, key)
       Js.promiseThen(finalValue, resolved =>
@@ -493,7 +616,7 @@ and update = (
       if syncCfg === None {
         Watchers.callWatchers(ctx, key, finalValue, k => DomQuery.getValue(ctx, k).value)
       }
-      callDirectives(ctx, finalValue, key, isDelete, parent, prop, None, false, syncCfg)
+      callDirectives(ctx, finalValue, key, isDelete, parent, prop, false, syncCfg)
     }
   }
 }
@@ -507,14 +630,12 @@ and runComputed = (
 ): unknown => {
   let version = Computed.bumpVersion(ctx, key)
   let result = Js.callFn(computedFn)
-
   if Js.isPromise(result) {
     Js.promiseThenCatch(
       result,
       v =>
         if Computed.isCurrentVersion(ctx, key, version) {
-          let proxied = proxyComputed(ctx, v, Some(key), Some(parent), Some(prop))
-          update(ctx, proxied, key, false, parent, prop, None)
+          update(ctx, proxyComputed(ctx, v, Some(key), Some(parent), Some(prop)), key, false, parent, prop, None)
         },
       err => Console.error3("[entropy] Async computed error at", key, err),
     )
@@ -529,8 +650,11 @@ and updateComputed = (ctx: context, changedKey: string): unit =>
     update(ctx, dep.computed, dep.key, false, dep.parent, dep.prop, None)
   )
 
+// Wire up update forward ref
+let () = updateFnRef := update
+
 // ═══════════════════════════════════════════════════════════════════════════════
-// reactive — Proxy handler (genuinely needs %raw — Proxy is a JS concept)
+// reactive — Proxy handler
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let reactive: (context, 'a, string, option<unknown>, option<string>) => 'a = %raw(`
@@ -593,28 +717,10 @@ let () = reactiveRef := Js.cast(reactive)
 let bootstrapDirectives = (ctx: context): unit => {
   Directives.registerBuiltins(ctx)
   ctx.directives
-  ->Map.set(
-    "if",
-    {
-      cb: (params: directiveParams) =>
-        ifOrIfNot(ctx, params.el, params.value, params.key, If, (ctx, el, isSyncRoot) =>
-          syncNodeImpl(ctx, el, isSyncRoot, update)
-        ),
-      isParametric: false,
-    },
-  )
+  ->Map.set("if", {cb: (p: directiveParams) => ifOrIfNot(ctx, p.el, p.value, p.key, If), isParametric: false})
   ->ignore
   ctx.directives
-  ->Map.set(
-    "ifnot",
-    {
-      cb: (params: directiveParams) =>
-        ifOrIfNot(ctx, params.el, params.value, params.key, IfNot, (ctx, el, isSyncRoot) =>
-          syncNodeImpl(ctx, el, isSyncRoot, update)
-        ),
-      isParametric: false,
-    },
-  )
+  ->Map.set("ifnot", {cb: (p: directiveParams) => ifOrIfNot(ctx, p.el, p.value, p.key, IfNot), isParametric: false})
   ->ignore
 }
 
@@ -625,10 +731,7 @@ let bootstrapDirectives = (ctx: context): unit => {
 let batch = (ctx: context, fn: unit => unit): unit => {
   ctx.batchQueue = Some([])
   try { fn() } catch { | _ => () }
-  let queue = switch ctx.batchQueue {
-  | Some(q) => q
-  | None => []
-  }
+  let queue = switch ctx.batchQueue { | Some(q) => q | None => [] }
   ctx.batchQueue = None
   queue->Array.forEach(task => task())
 }
